@@ -1,7 +1,7 @@
 -include .env
 export
 
-.PHONY: migrate migrate-down migrate-new generate lint format test build dev
+.PHONY: migrate migrate-down migrate-new generate lint format test build dev db db-down up down
 
 # Migrations
 migrate:
@@ -34,8 +34,18 @@ dev:
 	go run ./cmd/template
 
 # Docker Commands
+
+# Start only postgres (port exposed at localhost:5432 for host tools)
+db:
+	docker compose --profile postgres up -d postgres
+
+# Stop postgres
+db-down:
+	docker compose --profile postgres down
+
+# Start the full stack (app + postgres)
 up:
-	docker compose up -d
+	docker compose --profile postgres up -d
 
 down:
-	docker compose down
+	docker compose --profile postgres down
