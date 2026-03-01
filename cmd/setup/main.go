@@ -40,9 +40,13 @@ func main() {
 		removeComposeService("compose.yaml", "postgres")
 		removeMatchingLines(".env.example", "DATABASE_URL", "postgres", "Postgres")
 		removeMakeTargets("Makefile", "db", "db-down", "migrate", "migrate-down", "migrate-new")
-		tidyModules()
 		slog.Info("removed all postgresql infrastructure")
 	}
+
+	// Remove the setup command itself and tidy modules so setup-only
+	// dependencies (like the yaml package) are pruned automatically.
+	removeSelf()
+	tidyModules()
 }
 
 // prompt asks the user how they want to configure postgres and returns

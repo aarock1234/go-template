@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"slices"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 // removeDir deletes a directory tree. No-op if it does not exist.
@@ -18,39 +20,51 @@ func removeDir(path string) {
 	slog.Info("removed directory", "path", path)
 }
 
-// removeComposeService strips a named service block from a compose file.
-// A service block starts with "  <name>:" and ends at the next line with
-// two-space indent (the next sibling key).
+// removeComposeService removes a named service from a compose file using
+// proper YAML parsing.
 func removeComposeService(path, service string) {
-	prefix := "  " + service + ":"
-
-	if err := rewriteFile(path, func(lines []string) []string {
-		var out []string
-		skip := false
-		for _, line := range lines {
-			if strings.HasPrefix(line, prefix) {
-				skip = true
-				continue
-			}
-			if skip && len(line) > 0 && !strings.HasPrefix(line, "   ") {
-				skip = false
-			}
-			if !skip {
-				out = append(out, line)
-			}
-		}
-		return out
-	}); err != nil {
-		slog.Error("remove compose service", "service", service, "error", err)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		slog.Error("read compose file", "path", path, "error", err)
 		return
 	}
+
+	var doc map[string]any
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		slog.Error("parse compose file", "path", path, "error", err)
+		return
+	}
+
+	services, ok := doc["services"].(map[string]any)
+	if !ok {
+		slog.Error("compose file missing services key", "path", path)
+		return
+	}
+
+	if _, exists := services[service]; !exists {
+		return
+	}
+
+	delete(services, service)
+
+	out, err := yaml.Marshal(doc)
+	if err != nil {
+		slog.Error("marshal compose file", "error", err)
+		return
+	}
+
+	if err := os.WriteFile(path, out, 0644); err != nil {
+		slog.Error("write compose file", "path", path, "error", err)
+		return
+	}
+
 	slog.Info("removed compose service", "service", service)
 }
 
 // removeMatchingLines drops every line that contains at least one of the
 // provided substrings.
 func removeMatchingLines(path string, substrings ...string) {
-	if err := rewriteFile(path, func(lines []string) []string {
+	if err := rewriteLines(path, func(lines []string) []string {
 		return slices.DeleteFunc(lines, func(line string) bool {
 			for _, sub := range substrings {
 				if strings.Contains(line, sub) {
@@ -74,7 +88,7 @@ func removeMakeTargets(path string, targets ...string) {
 		drop[t] = true
 	}
 
-	if err := rewriteFile(path, func(lines []string) []string {
+	if err := rewriteLines(path, func(lines []string) []string {
 		var out []string
 		skip := false
 		for _, line := range lines {
@@ -123,8 +137,16 @@ func tidyModules() {
 	slog.Info("cleaned go module dependencies")
 }
 
-// rewriteFile reads a file, transforms its lines, and writes the result back.
-func rewriteFile(path string, fn func([]string) []string) error {
+// removeSelf deletes the cmd/setup directory and its Makefile target,
+// so go mod tidy will also strip any setup-only dependencies.
+func removeSelf() {
+	removeDir("cmd/setup")
+	removeMakeTargets("Makefile", "setup")
+	slog.Info("removed setup command")
+}
+
+// rewriteLines reads a file, transforms its lines, and writes the result back.
+func rewriteLines(path string, fn func([]string) []string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("read %s: %w", path, err)
