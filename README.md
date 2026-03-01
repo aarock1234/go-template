@@ -64,34 +64,26 @@ go-template/
 | `make lint`     | Static analysis via `go vet`     |
 | `make format`   | Format code                      |
 | `make generate` | Run code generation (sqlc)       |
-| `make watch`    | Hot-reload via docker compose watch |
 
 ### Database
 
-| Command             | Description                 |
-| ------------------- | --------------------------- |
-| `make migrate`      | Run migrations up           |
-| `make migrate-down` | Roll back last migration    |
-| `make migrate-new`  | Create a new migration file |
-
-### Docker
-
-| Command      | Description                       |
-| ------------ | --------------------------------- |
-| `make up`    | Start full stack (app + postgres) |
-| `make down`  | Stop all services                 |
-| `make watch` | Hot reload via docker compose watch |
-
-### Database
-
-| Command        | Description                          |
-| -------------- | ------------------------------------ |
-| `make db`      | Start postgres only (localhost:5432) |
-| `make db-down` | Stop postgres                        |
+| Command             | Description                          |
+| ------------------- | ------------------------------------ |
+| `make db`           | Start postgres only (localhost:5432) |
+| `make db-down`      | Stop postgres                        |
+| `make migrate`      | Run migrations up                    |
+| `make migrate-down` | Roll back last migration             |
+| `make migrate-new`  | Create a new migration file          |
 
 The postgres service is opt-in. `make db` starts it locally on `localhost:5432`. To use an external database instead, skip `make db` and set `DATABASE_URL` in `.env` to point at your instance.
 
-For hot reload during development, use `make watch` which rebuilds on file changes.
+### Docker
+
+| Command      | Description                         |
+| ------------ | ----------------------------------- |
+| `make up`    | Start full stack (app + postgres)   |
+| `make down`  | Stop all services                   |
+| `make watch` | Hot reload via docker compose watch |
 
 ## Configuration
 
