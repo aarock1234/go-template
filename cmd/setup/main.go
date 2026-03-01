@@ -1,5 +1,7 @@
 // setup configures a freshly scaffolded project by stripping unused
-// postgres infrastructure based on user input.
+// infrastructure based on user input. Source files use comment markers
+// (e.g. "# [postgres]" / "# [/postgres]") to delimit feature-specific
+// blocks that can be cleanly removed.
 //
 // Run with: go run ./cmd/setup
 package main
@@ -14,58 +16,64 @@ import (
 	_ "github.com/aarock1234/go-template/pkg/log" // colorized slog
 )
 
-// postgresMode describes how (or whether) the project uses PostgreSQL.
-type postgresMode int
-
-const (
-	postgresNone     postgresMode = iota // no postgres at all
-	postgresDocker                       // postgres runs via docker compose
-	postgresExternal                     // postgres is managed externally
-)
+var scanner = bufio.NewScanner(os.Stdin)
 
 func main() {
-	mode := prompt()
+	configurePostgres()
+	// future: configureRedis(), configureAuth(), etc.
 
-	switch mode {
-	case postgresDocker:
-		slog.Info("kept postgresql with docker, no changes")
-
-	case postgresExternal:
-		removeComposeService("compose.yaml", "postgres")
-		removeMakeTargets("Makefile", "db", "db-down")
-		slog.Info("configured postgresql for external use")
-
-	case postgresNone:
-		removeDir("pkg/db")
-		removeComposeService("compose.yaml", "postgres")
-		removeMatchingLines(".env.example", "DATABASE_URL", "postgres", "Postgres")
-		removeMakeTargets("Makefile", "db", "db-down", "migrate", "migrate-down", "migrate-new")
-		slog.Info("removed all postgresql infrastructure")
-	}
-
-	// Remove the setup command itself and tidy modules so setup-only
-	// dependencies (like the yaml package) are pruned automatically.
 	removeSelf()
 	tidyModules()
 }
 
-// prompt asks the user how they want to configure postgres and returns
-// the selected mode.
-func prompt() postgresMode {
-	scanner := bufio.NewScanner(os.Stdin)
-	ask := func(q string) string {
-		fmt.Print(q)
-		scanner.Scan()
-		return strings.TrimSpace(scanner.Text())
-	}
+// ask prints a question and returns the trimmed response.
+func ask(q string) string {
+	fmt.Print(q)
+	scanner.Scan()
+	return strings.TrimSpace(scanner.Text())
+}
 
+// configurePostgres prompts the user for PostgreSQL preferences and strips
+// unused postgres infrastructure accordingly.
+func configurePostgres() {
 	if !strings.EqualFold(ask("Use PostgreSQL? [y/N] "), "y") {
-		return postgresNone
+		removePostgres()
+		return
 	}
 
 	if strings.EqualFold(ask("Docker or external? [docker/external] "), "external") {
-		return postgresExternal
+		removePostgresDocker()
+		return
 	}
 
-	return postgresDocker
+	slog.Info("kept postgresql with docker, no changes")
+}
+
+// removePostgres strips all postgres infrastructure from the project.
+func removePostgres() {
+	if err := removeDir("pkg/db"); err != nil {
+		slog.Error("remove directory", "error", err)
+	}
+	if err := removeComposeService("compose.yaml", "postgres"); err != nil {
+		slog.Error("remove compose service", "error", err)
+	}
+	if err := removeMarkedSections("Makefile", "postgres"); err != nil {
+		slog.Error("remove makefile sections", "error", err)
+	}
+	if err := removeMarkedSections(".env.example", "postgres"); err != nil {
+		slog.Error("remove env sections", "error", err)
+	}
+	slog.Info("removed all postgresql infrastructure")
+}
+
+// removePostgresDocker strips only the docker-managed postgres pieces,
+// keeping the Go database package for an externally managed instance.
+func removePostgresDocker() {
+	if err := removeComposeService("compose.yaml", "postgres"); err != nil {
+		slog.Error("remove compose service", "error", err)
+	}
+	if err := removeMarkedSections("Makefile", "postgres-docker"); err != nil {
+		slog.Error("remove makefile sections", "error", err)
+	}
+	slog.Info("configured postgresql for external use")
 }

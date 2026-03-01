@@ -5,124 +5,108 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
-	"slices"
 	"strings"
 
 	"gopkg.in/yaml.v3"
 )
 
-// removeDir deletes a directory tree. No-op if it does not exist.
-func removeDir(path string) {
+// removeDir deletes a directory tree. Returns nil if the path does not exist.
+func removeDir(path string) error {
 	if err := os.RemoveAll(path); err != nil {
-		slog.Error("remove directory", "path", path, "error", err)
-		return
+		return fmt.Errorf("remove directory %s: %w", path, err)
 	}
 	slog.Info("removed directory", "path", path)
+	return nil
 }
 
-// removeComposeService removes a named service from a compose file using
-// proper YAML parsing.
-func removeComposeService(path, service string) {
+// removeComposeService removes a named service from a Docker Compose file
+// using YAML parsing to preserve structure.
+func removeComposeService(path, service string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		slog.Error("read compose file", "path", path, "error", err)
-		return
+		return fmt.Errorf("read compose file: %w", err)
 	}
 
 	var doc map[string]any
 	if err := yaml.Unmarshal(data, &doc); err != nil {
-		slog.Error("parse compose file", "path", path, "error", err)
-		return
+		return fmt.Errorf("parse compose file: %w", err)
 	}
 
 	services, ok := doc["services"].(map[string]any)
 	if !ok {
-		slog.Error("compose file missing services key", "path", path)
-		return
+		return fmt.Errorf("compose file missing services key")
 	}
 
 	if _, exists := services[service]; !exists {
-		return
+		return nil
 	}
 
 	delete(services, service)
 
 	out, err := yaml.Marshal(doc)
 	if err != nil {
-		slog.Error("marshal compose file", "error", err)
-		return
+		return fmt.Errorf("marshal compose file: %w", err)
 	}
 
 	if err := os.WriteFile(path, out, 0644); err != nil {
-		slog.Error("write compose file", "path", path, "error", err)
-		return
+		return fmt.Errorf("write compose file: %w", err)
 	}
 
 	slog.Info("removed compose service", "service", service)
+	return nil
 }
 
-// removeMatchingLines drops every line that contains at least one of the
-// provided substrings.
-func removeMatchingLines(path string, substrings ...string) {
-	if err := rewriteLines(path, func(lines []string) []string {
-		return slices.DeleteFunc(lines, func(line string) bool {
-			for _, sub := range substrings {
-				if strings.Contains(line, sub) {
-					return true
-				}
-			}
-			return false
-		})
-	}); err != nil {
-		slog.Error("remove matching lines", "path", path, "error", err)
-		return
-	}
-	slog.Info("cleaned env file", "path", path)
-}
+// removeMarkedSections removes all lines between "# [tag]" and "# [/tag]"
+// markers (inclusive) from the file at path. Multiple sections with the same
+// tag are all removed. Returns nil if the file contains no matching markers.
+func removeMarkedSections(path, tag string) error {
+	open := "# [" + tag + "]"
+	close := "# [/" + tag + "]"
 
-// removeMakeTargets strips named target blocks and their .PHONY entries
-// from a Makefile.
-func removeMakeTargets(path string, targets ...string) {
-	drop := make(map[string]bool, len(targets))
-	for _, t := range targets {
-		drop[t] = true
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", path, err)
 	}
 
-	if err := rewriteLines(path, func(lines []string) []string {
-		var out []string
-		skip := false
-		for _, line := range lines {
-			if strings.HasPrefix(line, ".PHONY:") {
-				parts := slices.DeleteFunc(strings.Fields(line), func(p string) bool {
-					return p != ".PHONY:" && drop[p]
-				})
-				out = append(out, strings.Join(parts, " "))
-				continue
-			}
+	lines := strings.Split(string(data), "\n")
+	var out []string
+	skip := false
 
-			name, _, hasColon := strings.Cut(line, ":")
-			if hasColon && drop[strings.TrimSpace(name)] {
-				skip = true
-				continue
-			}
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
 
-			if skip && !strings.HasPrefix(line, "\t") {
-				if strings.TrimSpace(line) == "" {
-					continue
-				}
-				skip = false
-			}
-
-			if !skip {
-				out = append(out, line)
-			}
+		if trimmed == open {
+			skip = true
+			continue
 		}
-		return out
-	}); err != nil {
-		slog.Error("remove make targets", "path", path, "error", err)
-		return
+
+		if trimmed == close {
+			skip = false
+			continue
+		}
+
+		if !skip {
+			out = append(out, line)
+		}
 	}
-	slog.Info("removed make targets", "path", path, "targets", targets)
+
+	if err := os.WriteFile(path, []byte(strings.Join(out, "\n")), 0644); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+
+	slog.Info("removed marked sections", "path", path, "tag", tag)
+	return nil
+}
+
+// removeSelf deletes the cmd/setup directory and its marked sections in the
+// Makefile, so go mod tidy will also strip any setup-only dependencies.
+func removeSelf() {
+	if err := removeDir("cmd/setup"); err != nil {
+		slog.Error("remove setup directory", "error", err)
+	}
+	if err := removeMarkedSections("Makefile", "setup"); err != nil {
+		slog.Error("remove setup makefile section", "error", err)
+	}
 }
 
 // tidyModules runs go mod tidy to prune unused dependencies.
@@ -132,31 +116,5 @@ func tidyModules() {
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		slog.Error("go mod tidy", "error", err)
-		return
 	}
-	slog.Info("cleaned go module dependencies")
-}
-
-// removeSelf deletes the cmd/setup directory and its Makefile target,
-// so go mod tidy will also strip any setup-only dependencies.
-func removeSelf() {
-	removeDir("cmd/setup")
-	removeMakeTargets("Makefile", "setup")
-	slog.Info("removed setup command")
-}
-
-// rewriteLines reads a file, transforms its lines, and writes the result back.
-func rewriteLines(path string, fn func([]string) []string) error {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return fmt.Errorf("read %s: %w", path, err)
-	}
-
-	lines := fn(strings.Split(string(data), "\n"))
-
-	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0644); err != nil {
-		return fmt.Errorf("write %s: %w", path, err)
-	}
-
-	return nil
 }
