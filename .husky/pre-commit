@@ -4,9 +4,17 @@ cyan="\033[36m"
 reset="\033[0m"
 prefix="${bold}${cyan}pre-commit${reset}"
 
+if command -v make >/dev/null 2>&1; then
+  run() { make "$@"; }
+else
+  run_format() { go fmt ./...; }
+  run_lint() { go vet ./...; }
+  run() { "run_$1"; }
+fi
+
 printf "${prefix} formatting go files\n"
-make format
+run format
 git add --all -- **/*.go
 
 printf "${prefix} vetting go files\n"
-make lint
+run lint
