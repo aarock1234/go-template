@@ -17,7 +17,7 @@ go install golang.org/x/tools/cmd/gonew@latest
 Scaffold a new project:
 
 ```bash
-gonew github.com/aarock1234/go-template@latest github.com/you/myproject
+gonew github.com/aarock1234/go-template@latest myproject
 ```
 
 Clones the template and rewrites all import paths to your module name.
