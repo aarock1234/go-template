@@ -1,5 +1,6 @@
 // Package env loads environment variables from a .env file into the process
-// environment. Existing variables take precedence over file-defined values.
+// environment and validates required variables into a typed Config.
+// Existing process environment variables take precedence over file-defined values.
 package env
 
 import (
@@ -12,25 +13,23 @@ import (
 )
 
 var (
-	muLoad sync.Mutex
+	mu     sync.Mutex
 	loaded = make(map[string]error)
 )
 
-// Load reads environment variables from a .env file and sets them in the
-// process environment. Existing environment variables take precedence.
-// Repeated calls with the same file path return the cached result.
-func Load(file ...string) error {
-	if len(file) > 1 {
-		slog.Warn("env.Load called with multiple files, only the first will be used")
-	}
-
+// Load reads key=value pairs from a .env file and sets them in the process
+// environment. Existing variables are not overwritten. Repeated calls with
+// the same path are no-ops and return the cached result.
+//
+// If no path is provided, ".env" is used.
+func Load(path ...string) error {
 	filename := ".env"
-	if len(file) > 0 && file[0] != "" {
-		filename = file[0]
+	if len(path) > 0 && path[0] != "" {
+		filename = path[0]
 	}
 
-	muLoad.Lock()
-	defer muLoad.Unlock()
+	mu.Lock()
+	defer mu.Unlock()
 
 	if err, ok := loaded[filename]; ok {
 		return err
@@ -48,86 +47,50 @@ func load(filename string) error {
 		if os.IsNotExist(err) {
 			return nil
 		}
-
-		return fmt.Errorf("statting env file %q: %w", filename, err)
+		return fmt.Errorf("stat %q: %w", filename, err)
 	}
 
 	f, err := os.Open(filename)
 	if err != nil {
-		return fmt.Errorf("opening env file %q: %w", filename, err)
+		return fmt.Errorf("open %q: %w", filename, err)
 	}
 	defer f.Close()
 
-	var (
-		envVars    = make(map[string]string)
-		keyLines   = make(map[string]int)
-		scanner    = bufio.NewScanner(f)
-		lineNumber = 0
-	)
+	vars := make(map[string]string)
+	scanner := bufio.NewScanner(f)
 
-	for scanner.Scan() {
-		lineNumber++
-		line := scanner.Text()
-		line = strings.TrimSpace(line)
-
-		if strings.HasPrefix(line, "#") || line == "" {
+	for n := 1; scanner.Scan(); n++ {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
 
-		split := strings.SplitN(line, "=", 2)
-		if len(split) != 2 {
-			slog.Warn("ignoring invalid env line",
-				slog.String("file", filename),
-				slog.Int("line_number", lineNumber),
-				slog.String("line", line),
-			)
-
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			slog.Warn("env: skipping invalid line", "file", filename, "line", n)
 			continue
 		}
 
-		key := strings.TrimSpace(split[0])
-		value := strings.TrimSpace(split[1])
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
 
-		if len(value) > 1 && ((value[0] == '"' && value[len(value)-1] == '"') || (value[0] == '\'' && value[len(value)-1] == '\'')) {
+		if len(value) >= 2 && (value[0] == '"' || value[0] == '\'') && value[0] == value[len(value)-1] {
 			value = value[1 : len(value)-1]
 		}
 
-		if previousLine, exists := keyLines[key]; exists {
-			slog.Warn("overwriting previous definition for key in env file",
-				slog.String("file", filename),
-				slog.String("key", key),
-				slog.Int("previous_line", previousLine),
-				slog.Int("new_line", lineNumber),
-			)
-		}
-
-		envVars[key] = value
-		keyLines[key] = lineNumber
+		vars[key] = value
 	}
 
 	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("scanning env file %q: %w", filename, err)
+		return fmt.Errorf("scan %q: %w", filename, err)
 	}
 
-	for key, value := range envVars {
+	for key, value := range vars {
 		if _, exists := os.LookupEnv(key); exists {
-			slog.Warn("skipping env var from file, already set in environment",
-				slog.String("file", filename),
-				slog.String("key", key),
-				slog.Int("line_defined", keyLines[key]),
-			)
-
 			continue
 		}
-
-		err = os.Setenv(key, value)
-		if err != nil {
-			slog.Warn("failed to set env var from file",
-				slog.String("file", filename),
-				slog.String("key", key),
-				slog.Int("line_defined", keyLines[key]),
-				slog.String("error", err.Error()),
-			)
+		if err := os.Setenv(key, value); err != nil {
+			slog.Warn("env: failed to set variable", "key", key, "error", err)
 		}
 	}
 
