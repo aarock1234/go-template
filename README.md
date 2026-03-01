@@ -22,6 +22,12 @@ gonew github.com/aarock1234/go-template@latest github.com/you/myproject
 
 Clones the template and rewrites all import paths to your module name.
 
+After cloning, run the setup script to configure optional features:
+
+```bash
+./setup.sh
+```
+
 ## Setup
 
 **Prerequisites:** [Go 1.26+](https://go.dev/dl/), [Docker](https://docs.docker.com/get-docker/), [goose](https://github.com/pressly/goose), [sqlc](https://sqlc.dev)

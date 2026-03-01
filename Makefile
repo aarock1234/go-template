@@ -1,7 +1,10 @@
 -include .env
 export
 
-.PHONY: up down watch db db-down migrate migrate-down migrate-new generate lint format test build dev
+.PHONY: setup up down watch db db-down migrate migrate-down migrate-new generate lint format test build dev
+
+setup: ## Interactive project setup
+	@bash setup.sh
 
 # Docker Commands
 up:
