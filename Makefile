@@ -1,7 +1,7 @@
 -include .env
 export
 
-.PHONY: migrate migrate-down migrate-new generate lint format test build dev db db-down up down watch
+.PHONY: db db-down up down watch migrate migrate-down migrate-new generate lint format test build dev
 
 # Docker Commands
 
