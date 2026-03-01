@@ -8,11 +8,19 @@ An opinionated Go project template for scraper, bot, and service workloads. Batt
 
 ## Quick Start
 
+Install [`gonew`](https://pkg.go.dev/golang.org/x/tools/cmd/gonew):
+
 ```bash
-go run golang.org/x/tools/cmd/gonew@latest github.com/aarock1234/go-template@latest github.com/you/myproject
+go install golang.org/x/tools/cmd/gonew@latest
 ```
 
-Clones the template and rewrites all import paths to your module name. Requires [`gonew`](https://pkg.go.dev/golang.org/x/tools/cmd/gonew).
+Scaffold a new project:
+
+```bash
+gonew github.com/aarock1234/go-template@latest github.com/you/myproject
+```
+
+Clones the template and rewrites all import paths to your module name.
 
 ## Setup
 
