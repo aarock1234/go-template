@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"sync"
 
-	_ "go-template/package/log"
+	_ "go-template/pkg/log"
 )
 
 // FileRotator reads lines from a file and serves them in round-robin order.

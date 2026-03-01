@@ -3,8 +3,8 @@
 package template
 
 import (
-	"go-template/package/client"
-	"go-template/package/db"
+	"go-template/pkg/client"
+	"go-template/pkg/db"
 )
 
 // Template orchestrates HTTP requests and database access for a single domain.

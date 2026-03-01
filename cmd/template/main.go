@@ -8,10 +8,10 @@ import (
 	"os/signal"
 	"syscall"
 
-	"go-template/package/db"
-	"go-template/package/env"
-	_ "go-template/package/log" // structured logger init
-	"go-template/package/template"
+	"go-template/pkg/db"
+	"go-template/pkg/env"
+	_ "go-template/pkg/log" // structured logger init
+	"go-template/pkg/template"
 )
 
 type config struct {
