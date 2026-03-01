@@ -27,6 +27,10 @@ github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZb
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/refraction-networking/utls v1.8.2 h1:j4Q1gJj0xngdeH+Ox/qND11aEfhpgoEvV+S9iJ2IdQo=
 github.com/refraction-networking/utls v1.8.2/go.mod h1:jkSOEkLqn+S/jtpEHPOsVv/4V4EVnelwbMQl4vCWXAM=
+github.com/samber/do/v2 v2.0.0 h1:tnunwWaoqSfJ9hxVIaJawIo7JXHQlqT9d9YBXlE9Keg=
+github.com/samber/do/v2 v2.0.0/go.mod h1:ZSBCE7Xr6nTNIOVo4DBrkl2+ydUbIOzJjjdV8En5XO4=
+github.com/samber/go-type-to-string v1.8.0 h1:5z6tDTjtXxkIAoAuHAZYMYR8mkBZjVgeSH7jcSLqc8w=
+github.com/samber/go-type-to-string v1.8.0/go.mod h1:jpU77vIDoIxkahknKDoEx9C8bQ1ADnh2sotZ8I4QqBU=
 github.com/saucesteals/fhttp v1.0.1 h1:6T6TTKmgr4kp3jfb2vLD2qyNPgKPmBL+88FI6tHXIBw=
 github.com/saucesteals/fhttp v1.0.1/go.mod h1:BJGqcPgb8qSthUIS2GrSCjclvOpJ7llCaURDDTQ1a7Y=
 github.com/saucesteals/mimic v1.0.1 h1:NefWMWkWsOsa8quKZFDZtJHXMMgtSiw5+LYnRAeAlKo=
