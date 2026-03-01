@@ -5,10 +5,13 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"slices"
 	"strings"
+
+	_ "github.com/aarock1234/go-template/pkg/log"
 )
 
 const (
@@ -22,21 +25,21 @@ type config struct {
 }
 
 func main() {
-	cfg := configure()
+	config := configure()
 	fmt.Println()
 
 	switch {
-	case !cfg.postgres:
-		apply(os.RemoveAll("pkg/db"), "✓ Removed pkg/db/")
-		apply(removeSvcBlock("compose.yaml", "postgres"), "✓ Removed postgres from compose.yaml")
-		apply(dropLines(".env.example", "DATABASE_URL", "postgres", "Postgres"), "✓ Removed DATABASE_URL from .env.example")
-		apply(dropMakeTargets("Makefile", "db", "db-down", "migrate", "migrate-down", "migrate-new"), "✓ Removed db/migration Make targets")
-		apply(modTidy(), "✓ Cleaned Go dependencies")
-	case !cfg.docker:
-		apply(removeSvcBlock("compose.yaml", "postgres"), "✓ Removed postgres from compose.yaml (kept app)")
-		apply(dropMakeTargets("Makefile", "db", "db-down"), "✓ Removed make db / db-down targets")
+	case !config.postgres:
+		apply(os.RemoveAll("pkg/db"), "removed pkg/db/")
+		apply(removeSvcBlock("compose.yaml", "postgres"), "removed postgres from compose.yaml")
+		apply(dropLines(".env.example", "DATABASE_URL", "postgres", "Postgres"), "removed DATABASE_URL from .env.example")
+		apply(dropMakeTargets("Makefile", "db", "db-down", "migrate", "migrate-down", "migrate-new"), "removed db/migration make targets")
+		apply(modTidy(), "cleaned go dependencies")
+	case !config.docker:
+		apply(removeSvcBlock("compose.yaml", "postgres"), "removed postgres from compose.yaml (kept app)")
+		apply(dropMakeTargets("Makefile", "db", "db-down"), "removed make db / db-down targets")
 	default:
-		fmt.Println("✓ Kept PostgreSQL with Docker (no changes)")
+		slog.Info("kept postgresql with docker (no changes)")
 	}
 }
 
@@ -59,9 +62,11 @@ func configure() config {
 }
 
 func apply(err error, msg string) {
-	if err == nil {
-		fmt.Println(msg)
+	if err != nil {
+		slog.Error("step failed", slog.String("step", msg), slog.Any("error", err))
+		return
 	}
+	slog.Info(msg)
 }
 
 // removeSvcBlock removes a named service block from compose.yaml.
