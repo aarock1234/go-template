@@ -40,43 +40,32 @@ func ask(q string) string {
 // unused postgres infrastructure accordingly.
 func configurePostgres(ctx context.Context) {
 	if !strings.EqualFold(ask("Use PostgreSQL? [y/N] "), "y") {
-		removePostgres(ctx)
+		if err := removeDir("pkg/db"); err != nil {
+			slog.ErrorContext(ctx, "remove directory", "error", err)
+		}
+		if err := removeComposeService("compose.yaml", "postgres"); err != nil {
+			slog.ErrorContext(ctx, "remove compose service", "error", err)
+		}
+		if err := removeMarkedSections("Makefile", "postgres"); err != nil {
+			slog.ErrorContext(ctx, "remove makefile sections", "error", err)
+		}
+		if err := removeMarkedSections(".env.example", "postgres"); err != nil {
+			slog.ErrorContext(ctx, "remove env sections", "error", err)
+		}
+		slog.InfoContext(ctx, "removed all postgresql infrastructure")
 		return
 	}
 
 	if strings.EqualFold(ask("Docker or external? [docker/external] "), "external") {
-		removePostgresDocker(ctx)
+		if err := removeComposeService("compose.yaml", "postgres"); err != nil {
+			slog.ErrorContext(ctx, "remove compose service", "error", err)
+		}
+		if err := removeMarkedSections("Makefile", "postgres-docker"); err != nil {
+			slog.ErrorContext(ctx, "remove makefile sections", "error", err)
+		}
+		slog.InfoContext(ctx, "configured postgresql for external use")
 		return
 	}
 
 	slog.InfoContext(ctx, "kept postgresql with docker, no changes")
-}
-
-// removePostgres strips all postgres infrastructure from the project.
-func removePostgres(ctx context.Context) {
-	if err := removeDir("pkg/db"); err != nil {
-		slog.ErrorContext(ctx, "remove directory", "error", err)
-	}
-	if err := removeComposeService("compose.yaml", "postgres"); err != nil {
-		slog.ErrorContext(ctx, "remove compose service", "error", err)
-	}
-	if err := removeMarkedSections("Makefile", "postgres"); err != nil {
-		slog.ErrorContext(ctx, "remove makefile sections", "error", err)
-	}
-	if err := removeMarkedSections(".env.example", "postgres"); err != nil {
-		slog.ErrorContext(ctx, "remove env sections", "error", err)
-	}
-	slog.InfoContext(ctx, "removed all postgresql infrastructure")
-}
-
-// removePostgresDocker strips only the docker-managed postgres pieces,
-// keeping the Go database package for an externally managed instance.
-func removePostgresDocker(ctx context.Context) {
-	if err := removeComposeService("compose.yaml", "postgres"); err != nil {
-		slog.ErrorContext(ctx, "remove compose service", "error", err)
-	}
-	if err := removeMarkedSections("Makefile", "postgres-docker"); err != nil {
-		slog.ErrorContext(ctx, "remove makefile sections", "error", err)
-	}
-	slog.InfoContext(ctx, "configured postgresql for external use")
 }
