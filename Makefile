@@ -1,19 +1,9 @@
 -include .env
 export
 
-.PHONY: db db-down up down watch migrate migrate-down migrate-new generate lint format test build dev
+.PHONY: up down watch db db-down migrate migrate-down migrate-new generate lint format test build dev
 
 # Docker Commands
-
-# Start only postgres (port exposed at localhost:5432 for host tools)
-db:
-	docker compose --profile postgres up -d postgres
-
-# Stop postgres
-db-down:
-	docker compose --profile postgres down
-
-# Start the full stack (app + postgres)
 up:
 	docker compose --profile postgres up -d
 
@@ -22,6 +12,13 @@ down:
 
 watch:
 	docker compose watch
+
+# Database
+db:
+	docker compose --profile postgres up -d postgres
+
+db-down:
+	docker compose --profile postgres down
 
 # Migrations
 migrate:

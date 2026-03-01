@@ -76,16 +76,22 @@ go-template/
 
 ### Docker
 
-| Command         | Description                                      |
-| --------------- | ------------------------------------------------ |
-| `make db`       | Start postgres only (localhost:5432)             |
-| `make db-down`  | Stop postgres                                    |
-| `make up`       | Start full stack (app + postgres)                |
-| `make down`     | Stop all services                                |
+| Command      | Description                       |
+| ------------ | --------------------------------- |
+| `make up`    | Start full stack (app + postgres) |
+| `make down`  | Stop all services                 |
+| `make watch` | Hot reload via docker compose watch |
+
+### Database
+
+| Command        | Description                          |
+| -------------- | ------------------------------------ |
+| `make db`      | Start postgres only (localhost:5432) |
+| `make db-down` | Stop postgres                        |
 
 The postgres service is opt-in. `make db` starts it locally on `localhost:5432`. To use an external database instead, skip `make db` and set `DATABASE_URL` in `.env` to point at your instance.
 
-For hot-reload during development, use `make watch` which rebuilds on file changes.
+For hot reload during development, use `make watch` which rebuilds on file changes.
 
 ## Configuration
 
