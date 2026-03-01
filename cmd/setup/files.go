@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -15,7 +16,6 @@ func removeDir(path string) error {
 	if err := os.RemoveAll(path); err != nil {
 		return fmt.Errorf("remove directory %s: %w", path, err)
 	}
-	slog.Info("removed directory", "path", path)
 	return nil
 }
 
@@ -52,7 +52,6 @@ func removeComposeService(path, service string) error {
 		return fmt.Errorf("write compose file: %w", err)
 	}
 
-	slog.Info("removed compose service", "service", service)
 	return nil
 }
 
@@ -94,27 +93,29 @@ func removeMarkedSections(path, tag string) error {
 		return fmt.Errorf("write %s: %w", path, err)
 	}
 
-	slog.Info("removed marked sections", "path", path, "tag", tag)
 	return nil
 }
 
 // removeSelf deletes the cmd/setup directory and its marked sections in the
 // Makefile, so go mod tidy will also strip any setup-only dependencies.
-func removeSelf() {
+func removeSelf(ctx context.Context) {
 	if err := removeDir("cmd/setup"); err != nil {
-		slog.Error("remove setup directory", "error", err)
+		slog.ErrorContext(ctx, "remove setup directory", "error", err)
 	}
 	if err := removeMarkedSections("Makefile", "setup"); err != nil {
-		slog.Error("remove setup makefile section", "error", err)
+		slog.ErrorContext(ctx, "remove setup makefile section", "error", err)
 	}
+	slog.InfoContext(ctx, "removed setup command")
 }
 
 // tidyModules runs go mod tidy to prune unused dependencies.
-func tidyModules() {
+func tidyModules(ctx context.Context) {
 	cmd := exec.Command("go", "mod", "tidy")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		slog.Error("go mod tidy", "error", err)
+		slog.ErrorContext(ctx, "go mod tidy", "error", err)
+		return
 	}
+	slog.InfoContext(ctx, "cleaned go module dependencies")
 }
