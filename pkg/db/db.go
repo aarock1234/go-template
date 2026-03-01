@@ -7,7 +7,6 @@ package db
 import (
 	"context"
 	"fmt"
-	"log/slog"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -61,19 +60,17 @@ func TryAdvisoryLock(ctx context.Context, conn *pgxpool.Conn, key int64) (bool, 
 	return locked, nil
 }
 
-// InTx executes fn inside a database transaction. If fn returns an error
-// the transaction is rolled back; otherwise it is committed. Rollback
-// failures are logged so the original error is preserved for the caller.
+// InTx executes fn inside a database transaction. The transaction is
+// automatically rolled back if fn returns an error or panics. On success
+// the transaction is committed.
 func (d *DB) InTx(ctx context.Context, fn func(sqlc.Querier) error) error {
 	tx, err := d.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
 	}
+	defer tx.Rollback(ctx) //nolint:errcheck // no-op after Commit; intentionally ignored
 
 	if err := fn(d.WithTx(tx)); err != nil {
-		if rbErr := tx.Rollback(ctx); rbErr != nil {
-			slog.ErrorContext(ctx, "transaction rollback failed", slog.Any("error", rbErr))
-		}
 		return err
 	}
 
