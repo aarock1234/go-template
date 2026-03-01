@@ -13,6 +13,15 @@ import (
 	"github.com/mattn/go-isatty"
 )
 
+type contextKey int
+
+const idempotencyKey contextKey = iota
+
+// WithIdempotencyKey returns a copy of ctx carrying the given idempotency key.
+func WithIdempotencyKey(ctx context.Context, key string) context.Context {
+	return context.WithValue(ctx, idempotencyKey, key)
+}
+
 // ContextHandler wraps an slog.Handler to inject request-scoped values
 // from the context into every log record.
 type ContextHandler struct {
@@ -21,7 +30,7 @@ type ContextHandler struct {
 
 // Handle logs a slog.Record with request-scoped values from the context.
 func (h *ContextHandler) Handle(ctx context.Context, r slog.Record) error {
-	if key, ok := ctx.Value("idempotency_key").(string); ok {
+	if key, ok := ctx.Value(idempotencyKey).(string); ok {
 		r.AddAttrs(slog.String("idempotency_key", key))
 	}
 
