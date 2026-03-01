@@ -9,10 +9,10 @@ import (
 	"os/signal"
 	"syscall"
 
-	"go-template/pkg/db"
-	"go-template/pkg/env"
-	_ "go-template/pkg/log" // structured logger init
-	"go-template/pkg/template"
+	"github.com/aarock1234/go-template/pkg/db"
+	"github.com/aarock1234/go-template/pkg/env"
+	_ "github.com/aarock1234/go-template/pkg/log" // structured logger init
+	"github.com/aarock1234/go-template/pkg/template"
 )
 
 func main() {

@@ -1,4 +1,4 @@
-module go-template
+module github.com/aarock1234/go-template
 
 go 1.26.0
 

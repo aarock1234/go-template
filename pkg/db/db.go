@@ -11,7 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"go-template/pkg/db/sqlc"
+	"github.com/aarock1234/go-template/pkg/db/sqlc"
 )
 
 // DB provides a connection pool with query execution and transaction support.
