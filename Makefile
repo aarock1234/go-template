@@ -1,7 +1,7 @@
 -include .env
 export
 
-.PHONY: migrate migrate-down migrate-new generate lint format test build dev db db-down up down
+.PHONY: migrate migrate-down migrate-new generate lint format test build dev db db-down up down watch
 
 # Migrations
 migrate:
@@ -32,6 +32,9 @@ build:
 
 dev:
 	go run ./cmd/template
+
+watch:
+	docker compose watch
 
 # Docker Commands
 

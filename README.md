@@ -64,6 +64,7 @@ go-template/
 | `make lint`     | Static analysis via `go vet`     |
 | `make format`   | Format code                      |
 | `make generate` | Run code generation (sqlc)       |
+| `make watch`    | Hot-reload via docker compose watch |
 
 ### Database
 
@@ -82,9 +83,9 @@ go-template/
 | `make up`       | Start full stack (app + postgres)                |
 | `make down`     | Stop all services                                |
 
-The postgres service uses a Docker Compose profile and is opt-in. To use an external database instead, skip the `db`/`up` targets and set `DATABASE_URL` in `.env` to point at your instance.
+The postgres service is opt-in. `make db` starts it locally on `localhost:5432`. To use an external database instead, skip `make db` and set `DATABASE_URL` in `.env` to point at your instance.
 
-For hot-reload during development, use `docker compose watch` which rebuilds on file changes.
+For hot-reload during development, use `make watch` which rebuilds on file changes.
 
 ## Configuration
 
