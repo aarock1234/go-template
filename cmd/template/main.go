@@ -1,12 +1,13 @@
+// Package main is the entry point for the template application.
 package main
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"os"
-	"os/signal"
-	"syscall"
+
+	"go.uber.org/fx"
+	"go.uber.org/fx/fxevent"
 
 	"go-template/pkg/db"
 	"go-template/pkg/env"
@@ -14,51 +15,33 @@ import (
 	"go-template/pkg/template"
 )
 
-type config struct {
-	DatabaseURL string `env:"DATABASE_URL"`
-}
-
 func main() {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
+	app := fx.New(
+		fx.WithLogger(func() fxevent.Logger { return fxevent.NopLogger }),
+		env.Module,
+		db.Module,
+		template.Module,
+		fx.Invoke(run),
+	)
 
-	if err := env.Load(); err != nil {
-		slog.ErrorContext(ctx, "failed to load environment variables", "error", err)
+	ctx := context.Background()
+	if err := app.Start(ctx); err != nil {
+		slog.Error("start failed", "error", err)
 		os.Exit(1)
 	}
 
-	var cfg config
-	if err := env.Validate(&cfg); err != nil {
-		slog.ErrorContext(ctx, "failed to validate environment", "error", err)
-		os.Exit(1)
-	}
-
-	if err := run(ctx, cfg); err != nil {
-		slog.ErrorContext(ctx, "failed to run", "error", err)
+	if err := app.Stop(ctx); err != nil {
+		slog.Error("stop failed", "error", err)
 		os.Exit(1)
 	}
 }
 
-func run(ctx context.Context, cfg config) error {
-	slog.InfoContext(ctx, "template application started")
-
-	database, err := db.New(ctx, cfg.DatabaseURL)
+func run(t *template.Template) error {
+	resp, err := t.Example(context.Background())
 	if err != nil {
-		return fmt.Errorf("failed to create database: %w", err)
-	}
-	defer database.Close()
-
-	example, err := template.New(database, nil)
-	if err != nil {
-		return fmt.Errorf("failed to create template: %w", err)
+		return err
 	}
 
-	resp, err := example.Example(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to get example: %w", err)
-	}
-
-	slog.InfoContext(ctx, "example response", "response", resp)
-
+	slog.Info("example response", "response", resp)
 	return nil
 }
