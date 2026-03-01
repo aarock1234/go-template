@@ -67,20 +67,23 @@ go-template/
 
 ### Database
 
-| Command             | Description                 |
-| ------------------- | --------------------------- |
-| `make migrate`      | Run migrations up           |
-| `make migrate-down` | Roll back last migration    |
-| `make migrate-new`  | Create a new migration file |
+| Command             | Description                          |
+| ------------------- | ------------------------------------ |
+| `make db`           | Start postgres only (localhost:5432) |
+| `make db-down`      | Stop postgres                        |
+| `make migrate`      | Run migrations up                    |
+| `make migrate-down` | Roll back last migration             |
+| `make migrate-new`  | Create a new migration file          |
+
+The postgres service is opt-in. `make db` starts it locally on `localhost:5432`. To use an external database instead, skip `make db` and set `DATABASE_URL` in `.env` to point at your instance.
 
 ### Docker
 
-| Command     | Description                  |
-| ----------- | ---------------------------- |
-| `make up`   | Start services in background |
-| `make down` | Stop services                |
-
-For hot-reload during development, use `docker compose watch` which rebuilds on file changes.
+| Command      | Description                         |
+| ------------ | ----------------------------------- |
+| `make up`    | Start full stack (app + postgres)   |
+| `make down`  | Stop all services                   |
+| `make watch` | Hot reload via docker compose watch |
 
 ## Configuration
 
@@ -88,7 +91,7 @@ Configured via environment variables. Copy `.env.example` to `.env` to get start
 
 | Variable       | Required | Default | Description                      |
 | -------------- | -------- | ------- | -------------------------------- |
-| `DATABASE_URL` | Yes      | —       | PostgreSQL connection string     |
+| `DATABASE_URL` | Yes      | none    | PostgreSQL connection string     |
 | `LOG_LEVEL`    | No       | `info`  | `debug`, `info`, `warn`, `error` |
 
 ## License

@@ -1,7 +1,24 @@
 -include .env
 export
 
-.PHONY: migrate migrate-down migrate-new generate lint format test build dev
+.PHONY: up down watch db db-down migrate migrate-down migrate-new generate lint format test build dev
+
+# Docker Commands
+up:
+	docker compose --profile postgres up -d
+
+down:
+	docker compose --profile postgres down
+
+watch:
+	docker compose watch
+
+# Database
+db:
+	docker compose --profile postgres up -d postgres
+
+db-down:
+	docker compose --profile postgres down
 
 # Migrations
 migrate:
@@ -32,10 +49,3 @@ build:
 
 dev:
 	go run ./cmd/template
-
-# Docker Commands
-up:
-	docker compose up -d
-
-down:
-	docker compose down
