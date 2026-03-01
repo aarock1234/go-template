@@ -25,7 +25,7 @@ Clones the template and rewrites all import paths to your module name.
 After cloning, run the setup script to configure optional features:
 
 ```bash
-./setup.sh
+make setup
 ```
 
 ## Setup
