@@ -1,4 +1,6 @@
-// setup is an interactive project configurator.
+// setup configures a freshly scaffolded project by stripping unused
+// postgres infrastructure based on user input.
+//
 // Run with: go run ./cmd/setup
 package main
 
@@ -7,159 +9,59 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
-	"slices"
 	"strings"
 
-	_ "github.com/aarock1234/go-template/pkg/log"
+	_ "github.com/aarock1234/go-template/pkg/log" // colorized slog
 )
+
+// postgresMode describes how (or whether) the project uses PostgreSQL.
+type postgresMode int
 
 const (
-	green = "\033[0;32m"
-	reset = "\033[0m"
+	postgresNone     postgresMode = iota // no postgres at all
+	postgresDocker                       // postgres runs via docker compose
+	postgresExternal                     // postgres is managed externally
 )
 
-type config struct {
-	postgres bool
-	docker   bool
-}
-
 func main() {
-	config := configure()
-	fmt.Println()
+	mode := prompt()
 
-	switch {
-	case !config.postgres:
-		apply(os.RemoveAll("pkg/db"), "removed pkg/db/")
-		apply(removeSvcBlock("compose.yaml", "postgres"), "removed postgres from compose.yaml")
-		apply(dropLines(".env.example", "DATABASE_URL", "postgres", "Postgres"), "removed DATABASE_URL from .env.example")
-		apply(dropMakeTargets("Makefile", "db", "db-down", "migrate", "migrate-down", "migrate-new"), "removed db/migration make targets")
-		apply(modTidy(), "cleaned go dependencies")
-	case !config.docker:
-		apply(removeSvcBlock("compose.yaml", "postgres"), "removed postgres from compose.yaml (kept app)")
-		apply(dropMakeTargets("Makefile", "db", "db-down"), "removed make db / db-down targets")
-	default:
-		slog.Info("kept postgresql with docker (no changes)")
+	switch mode {
+	case postgresDocker:
+		slog.Info("kept postgresql with docker, no changes")
+
+	case postgresExternal:
+		removeComposeService("compose.yaml", "postgres")
+		removeMakeTargets("Makefile", "db", "db-down")
+		slog.Info("configured postgresql for external use")
+
+	case postgresNone:
+		removeDir("pkg/db")
+		removeComposeService("compose.yaml", "postgres")
+		removeMatchingLines(".env.example", "DATABASE_URL", "postgres", "Postgres")
+		removeMakeTargets("Makefile", "db", "db-down", "migrate", "migrate-down", "migrate-new")
+		tidyModules()
+		slog.Info("removed all postgresql infrastructure")
 	}
 }
 
-func configure() config {
-	s := bufio.NewScanner(os.Stdin)
+// prompt asks the user how they want to configure postgres and returns
+// the selected mode.
+func prompt() postgresMode {
+	scanner := bufio.NewScanner(os.Stdin)
 	ask := func(q string) string {
-		fmt.Printf("%s%s%s", green, q, reset)
-		s.Scan()
-		return strings.TrimSpace(s.Text())
+		fmt.Print(q)
+		scanner.Scan()
+		return strings.TrimSpace(scanner.Text())
 	}
 
 	if !strings.EqualFold(ask("Use PostgreSQL? [y/N] "), "y") {
-		return config{}
+		return postgresNone
 	}
 
-	return config{
-		postgres: true,
-		docker:   !strings.EqualFold(ask("Docker or external? [docker/external] "), "external"),
-	}
-}
-
-func apply(err error, msg string) {
-	if err != nil {
-		slog.Error("step failed", slog.String("step", msg), slog.Any("error", err))
-		return
-	}
-	slog.Info(msg)
-}
-
-// removeSvcBlock removes a named service block from compose.yaml.
-func removeSvcBlock(path, svc string) error {
-	return transformLines(path, func(lines []string) []string {
-		var out []string
-		skip := false
-		prefix := "  " + svc + ":"
-		for _, line := range lines {
-			if strings.HasPrefix(line, prefix) {
-				skip = true
-				continue
-			}
-			if skip && len(line) > 0 && !strings.HasPrefix(line, "   ") {
-				skip = false
-			}
-			if !skip {
-				out = append(out, line)
-			}
-		}
-		return out
-	})
-}
-
-// dropLines removes any line containing one of the given substrings.
-func dropLines(path string, subs ...string) error {
-	return transformLines(path, func(lines []string) []string {
-		return slices.DeleteFunc(lines, func(line string) bool {
-			for _, sub := range subs {
-				if strings.Contains(line, sub) {
-					return true
-				}
-			}
-			return false
-		})
-	})
-}
-
-// dropMakeTargets removes named target blocks and their .PHONY entries.
-func dropMakeTargets(path string, targets ...string) error {
-	drop := make(map[string]bool, len(targets))
-	for _, t := range targets {
-		drop[t] = true
+	if strings.EqualFold(ask("Docker or external? [docker/external] "), "external") {
+		return postgresExternal
 	}
 
-	return transformLines(path, func(lines []string) []string {
-		var out []string
-		skip := false
-		for _, line := range lines {
-			if strings.HasPrefix(line, ".PHONY:") {
-				parts := slices.DeleteFunc(strings.Fields(line), func(p string) bool {
-					return p != ".PHONY:" && drop[p]
-				})
-				out = append(out, strings.Join(parts, " "))
-				continue
-			}
-
-			if isTarget(line, drop) {
-				skip = true
-				continue
-			}
-
-			if skip && !strings.HasPrefix(line, "\t") {
-				if strings.TrimSpace(line) == "" {
-					continue
-				}
-				skip = false
-			}
-
-			if !skip {
-				out = append(out, line)
-			}
-		}
-		return out
-	})
-}
-
-func isTarget(line string, targets map[string]bool) bool {
-	name, _, ok := strings.Cut(line, ":")
-	return ok && targets[strings.TrimSpace(name)]
-}
-
-func transformLines(path string, fn func([]string) []string) error {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return fmt.Errorf("read %s: %w", path, err)
-	}
-	return os.WriteFile(path, []byte(strings.Join(fn(strings.Split(string(data), "\n")), "\n")), 0644)
-}
-
-func modTidy() error {
-	cmd := exec.Command("go", "mod", "tidy")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	return postgresDocker
 }
