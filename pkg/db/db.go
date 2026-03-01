@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"go-template/pkg/db/sqlc"
@@ -60,17 +61,35 @@ func TryAdvisoryLock(ctx context.Context, conn *pgxpool.Conn, key int64) (bool, 
 	return locked, nil
 }
 
+// Begin starts a transaction and returns a Querier bound to it along with
+// the underlying pgx.Tx. The caller is responsible for calling Commit or
+// Rollback on the transaction.
+//
+// Prefer InTx for the common case. Use Begin when the transaction must span
+// multiple call sites or cannot be expressed as a single callback.
+func (d *DB) Begin(ctx context.Context) (sqlc.Querier, pgx.Tx, error) {
+	tx, err := d.pool.Begin(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("begin transaction: %w", err)
+	}
+
+	return sqlc.New(tx), tx, nil
+}
+
 // InTx executes fn inside a database transaction. The transaction is
 // automatically rolled back if fn returns an error or panics. On success
 // the transaction is committed.
 func (d *DB) InTx(ctx context.Context, fn func(sqlc.Querier) error) error {
-	tx, err := d.pool.Begin(ctx)
+	q, tx, err := d.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
+		return err
 	}
-	defer tx.Rollback(ctx) //nolint:errcheck // no-op after Commit; intentionally ignored
+	// Rollback is deferred to ensure the transaction is always cleaned up, even
+	// on panic. After a successful Commit the connection is already closed, so
+	// Rollback returns an error that is safe to ignore.
+	defer func() { _ = tx.Rollback(ctx) }()
 
-	if err := fn(d.WithTx(tx)); err != nil {
+	if err := fn(q); err != nil {
 		return err
 	}
 
