@@ -4,7 +4,7 @@
 ![License](https://img.shields.io/badge/License-Elastic_2.0-blue)
 ![CI](https://github.com/aarock1234/go-template/actions/workflows/ci.yaml/badge.svg)
 
-An opinionated Go project template for building services. Contains utilities for TLS-fingerprinted HTTP clients, PostgreSQL, and more. The `pkg/template` package is a skeleton; replace it with your own domain logic.
+An opinionated Go project template for scraper, bot, and service workloads. Batteries included: TLS-fingerprinted HTTP clients, exponential backoff, bounded concurrency, file-backed state, PostgreSQL, and structured logging.
 
 ## Setup
 

@@ -23,7 +23,7 @@ go build -o bin/app ./cmd/app
 
 ### Import Order
 
-Three groups, blank line between each: stdlib, external, internal.
+Four groups, blank line between each: stdlib, external, internal, side-effect.
 
 ```go
 import (
@@ -33,12 +33,14 @@ import (
 
     "github.com/google/uuid"
 
-    "project/package/service"
-    "project/package/client"
+    "project/pkg/client"
+    "project/pkg/service"
 
-    _ "project/package/logger"  // side-effect imports last with comment
+    _ "project/pkg/log"  // side-effect imports: own group with comment
 )
 ```
+
+Side-effect imports (`_`) go in a fourth group so `gofmt` won't sort them into the middle of internal imports.
 
 ### Naming Conventions
 
@@ -609,7 +611,7 @@ func (c *Cycle[T]) Next() T {
 
 ## HTTP Client Pattern
 
-Structure: `package/client/{client.go, proxies.go, cookies.go}`
+Structure: `pkg/client/{client.go, proxies.go, cookies.go}`
 
 **Note:** This section uses `github.com/enetx/http` (a fork of `net/http`). Adapt imports for your project.
 
@@ -785,15 +787,15 @@ project/
 ├── cmd/
 │   └── server/
 │       └── main.go        # entrypoint
-└── package/
+└── pkg/
     ├── handler/            # HTTP handlers
     ├── service/            # business logic
     ├── repository/         # data access
     ├── model/              # shared types
-    └── logger/             # side-effect init
+    └── log/                # side-effect init
 ```
 
-`package/` is the default for all project packages. Do not use `pkg/`. Only use `internal/` when the module is published for external consumers — this will be explicitly communicated.
+`pkg/` is the default for all project packages. Only use `internal/` when the module is published for external consumers — this will be explicitly communicated.
 
 ### Layered Architecture
 
@@ -937,7 +939,7 @@ Use `context.Background()` at the top of call chains (`main()`, test setup). Use
 Use `log/slog` with structured logging. Initialize default logger via side-effect import.
 
 ```go
-// package/logger/logger.go
+// pkg/log/log.go
 package log
 
 import (
@@ -957,7 +959,7 @@ func init() {
 import (
     "log/slog"
 
-    _ "project/package/logger"
+    _ "project/pkg/log"
 )
 
 func main() {
