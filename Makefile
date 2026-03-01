@@ -1,10 +1,21 @@
 -include .env
 export
 
-.PHONY: setup up down watch db db-down migrate migrate-down migrate-new generate lint format test build dev
-
+# [setup]
+.PHONY: setup
 setup: ## Interactive project setup
 	@go run ./cmd/setup
+# [/setup]
+
+# [postgres-docker]
+.PHONY: db db-down
+# [/postgres-docker]
+
+# [postgres]
+.PHONY: migrate migrate-down migrate-new
+# [/postgres]
+
+.PHONY: up down watch generate lint format test build dev
 
 # Docker Commands
 up:
@@ -16,13 +27,16 @@ down:
 watch:
 	docker compose watch
 
+# [postgres-docker]
 # Database
 db:
 	docker compose --profile postgres up -d postgres
 
 db-down:
 	docker compose --profile postgres down
+# [/postgres-docker]
 
+# [postgres]
 # Migrations
 migrate:
 	goose -dir package/db/migrations postgres $(DATABASE_URL) up
@@ -33,6 +47,7 @@ migrate-down:
 migrate-new:
 	@read -p "Migration name: " name && \
 	goose -dir package/db/migrations create $$name sql
+# [/postgres]
 
 # Go Commands
 generate:
