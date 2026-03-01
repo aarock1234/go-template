@@ -19,7 +19,9 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /bin/template ./cmd/template
 
 # production image
-FROM gcr.io/distroless/static-debian12 AS production
+FROM alpine:3.23 AS production
+
+RUN apk add --no-cache ca-certificates tzdata
 
 COPY --from=builder /bin/template /bin/template
 

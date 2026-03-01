@@ -1,7 +1,7 @@
 -include .env
 export
 
-.PHONY: migrate migrate-down migrate-new generate lint format build dev
+.PHONY: migrate migrate-down migrate-new generate lint format test build dev
 
 # Migrations
 migrate:
@@ -23,6 +23,9 @@ lint:
 
 format:
 	go fmt ./...
+
+test:
+	go test -race ./...
 
 build:
 	go build -o bin/template ./cmd/template

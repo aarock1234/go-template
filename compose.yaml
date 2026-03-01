@@ -11,5 +11,4 @@ services:
           path: .
           ignore:
             - .git/
-            - .husky/
             - .llm/

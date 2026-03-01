@@ -57,6 +57,6 @@ func logLevelFromEnv() slog.Level {
 	case "error":
 		return slog.LevelError
 	default:
-		return slog.LevelDebug
+		return slog.LevelInfo
 	}
 }
