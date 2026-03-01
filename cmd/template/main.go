@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"go-template/package/db"
 	"go-template/package/env"
@@ -17,8 +19,8 @@ type config struct {
 }
 
 func main() {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	if err := env.Load(); err != nil {
 		slog.ErrorContext(ctx, "failed to load environment variables", "error", err)
