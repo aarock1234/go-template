@@ -48,7 +48,10 @@ func run(ctx context.Context, cfg config) error {
 	}
 	defer database.Close()
 
-	example := template.New(database, nil)
+	example, err := template.New(database, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create template: %w", err)
+	}
 
 	resp, err := example.Example(ctx)
 	if err != nil {

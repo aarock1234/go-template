@@ -13,20 +13,18 @@ import (
 // Option configures the retry behavior.
 type Option func(*config)
 
+const (
+	defaultMaxAttempts  = 3
+	defaultInitialDelay = 1 * time.Second
+	defaultMaxDelay     = 10 * time.Second
+	defaultMultiplier   = 2.0
+)
+
 type config struct {
 	maxAttempts  int
 	initialDelay time.Duration
 	maxDelay     time.Duration
 	multiplier   float64
-}
-
-func defaults() config {
-	return config{
-		maxAttempts:  3,
-		initialDelay: 1 * time.Second,
-		maxDelay:     10 * time.Second,
-		multiplier:   2.0,
-	}
 }
 
 // WithMaxAttempts sets the maximum number of attempts (including the first).
@@ -54,7 +52,12 @@ func WithMultiplier(m float64) Option {
 // is reached. Between attempts it sleeps for an exponentially increasing
 // duration with full jitter: sleep = rand([0, min(initialDelay * multiplier^attempt, maxDelay))).
 func Do(ctx context.Context, fn func(ctx context.Context) error, opts ...Option) error {
-	cfg := defaults()
+	cfg := config{
+		maxAttempts:  defaultMaxAttempts,
+		initialDelay: defaultInitialDelay,
+		maxDelay:     defaultMaxDelay,
+		multiplier:   defaultMultiplier,
+	}
 	for _, opt := range opts {
 		opt(&cfg)
 	}
@@ -70,12 +73,13 @@ func Do(ctx context.Context, fn func(ctx context.Context) error, opts ...Option)
 			break
 		}
 
-		delay := backoff(attempt, cfg)
+		timer := time.NewTimer(backoff(attempt, cfg))
 
 		select {
 		case <-ctx.Done():
+			timer.Stop()
 			return ctx.Err()
-		case <-time.After(delay):
+		case <-timer.C:
 		}
 	}
 
