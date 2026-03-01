@@ -1,0 +1,9 @@
+bold="\033[1m"
+dim="\033[2m"
+cyan="\033[36m"
+reset="\033[0m"
+prefix="${bold}${cyan}pre-commit${reset}"
+
+printf "${prefix} formatting go files\n"
+go fmt ./...
+git add --all -- **/*.go

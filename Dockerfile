@@ -1,0 +1,26 @@
+# syntax=docker/dockerfile:1.7
+
+# dev: docker compose watch (go run, full toolchain)
+FROM golang:1.25 AS dev
+
+WORKDIR /app
+
+COPY go.mod go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
+
+COPY . .
+
+# builder: compiles the binary
+FROM dev AS builder
+
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /bin/template ./cmd/template
+
+# production image
+FROM gcr.io/distroless/static-debian12 AS production
+
+COPY --from=builder /bin/template /bin/template
+
+ENTRYPOINT ["/bin/template"]
