@@ -6,6 +6,28 @@
 
 An opinionated Go project template for scraper, bot, and service workloads. Batteries included: TLS-fingerprinted HTTP clients, exponential backoff, bounded concurrency, file-backed state, PostgreSQL, and structured logging.
 
+## Quick Start
+
+Install [`gonew`](https://pkg.go.dev/golang.org/x/tools/cmd/gonew):
+
+```bash
+go install golang.org/x/tools/cmd/gonew@latest
+```
+
+Scaffold a new project:
+
+```bash
+gonew github.com/aarock1234/go-template@latest github.com/you/myproject
+```
+
+Clones the template and rewrites all import paths to your module name.
+
+After cloning, run the setup script to configure optional features:
+
+```bash
+make setup
+```
+
 ## Setup
 
 **Prerequisites:** [Go 1.26+](https://go.dev/dl/), [Docker](https://docs.docker.com/get-docker/), [goose](https://github.com/pressly/goose), [sqlc](https://sqlc.dev)
