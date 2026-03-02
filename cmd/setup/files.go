@@ -7,8 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-
-	"gopkg.in/yaml.v3"
 )
 
 // removeDir deletes a directory tree. Returns nil if the path does not exist.
@@ -16,42 +14,6 @@ func removeDir(path string) error {
 	if err := os.RemoveAll(path); err != nil {
 		return fmt.Errorf("remove directory %s: %w", path, err)
 	}
-	return nil
-}
-
-// removeComposeService removes a named service from a Docker Compose file
-// using YAML parsing to preserve structure.
-func removeComposeService(path, service string) error {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return fmt.Errorf("read compose file: %w", err)
-	}
-
-	var doc map[string]any
-	if err := yaml.Unmarshal(data, &doc); err != nil {
-		return fmt.Errorf("parse compose file: %w", err)
-	}
-
-	services, ok := doc["services"].(map[string]any)
-	if !ok {
-		return fmt.Errorf("compose file missing services key")
-	}
-
-	if _, exists := services[service]; !exists {
-		return nil
-	}
-
-	delete(services, service)
-
-	out, err := yaml.Marshal(doc)
-	if err != nil {
-		return fmt.Errorf("marshal compose file: %w", err)
-	}
-
-	if err := os.WriteFile(path, out, 0644); err != nil {
-		return fmt.Errorf("write compose file: %w", err)
-	}
-
 	return nil
 }
 
