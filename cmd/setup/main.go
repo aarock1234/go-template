@@ -55,7 +55,7 @@ func main() {
 			huh.NewSelect[hosting]().
 				Title("PostgreSQL hosting").
 				Options(
-					huh.NewOption("Docker", hostingDocker),
+					huh.NewOption("Docker", hostingDocker).Selected(true),
 					huh.NewOption("External", hostingExternal),
 				).
 				Value(&s.pgHosting),
@@ -71,7 +71,7 @@ func main() {
 			huh.NewSelect[bool]().
 				Title("Apply changes?").
 				Options(
-					huh.NewOption("Apply", true),
+					huh.NewOption("Apply", true).Selected(true),
 					huh.NewOption("Cancel", false),
 				).
 				Value(&s.confirm),
