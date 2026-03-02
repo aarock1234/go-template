@@ -78,14 +78,15 @@ go-template/
 
 ## Development
 
-| Command         | Description                      |
-| --------------- | -------------------------------- |
-| `make dev`      | Run the application              |
-| `make build`    | Compile binary to `bin/template` |
-| `make test`     | Run tests with race detector     |
-| `make lint`     | Static analysis via `go vet`     |
-| `make format`   | Format code                      |
-| `make generate` | Run code generation (sqlc)       |
+| Command         | Description                                      |
+| --------------- | ------------------------------------------------ |
+| `make dev`      | Run the application                              |
+| `make build`    | Compile binary to `bin/template`                 |
+| `make test`     | Run tests with race detector via `go test -race` |
+| `make lint`     | Static analysis via `go vet`                     |
+| `make fix`      | Modernize code via `go fix`                      |
+| `make format`   | Format code via `go fmt`                         |
+| `make generate` | Run code generation via `sqlc generate`          |
 
 ### Database
 

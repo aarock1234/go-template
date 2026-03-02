@@ -10,68 +10,27 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 
 	"github.com/charmbracelet/huh"
 )
 
-// pkg maps an optional package to its directory for removal.
-type pkg struct {
-	label string
-	value string
-	dir   string
-}
-
-var packages = []pkg{
-	{
-		label: "HTTP Client: TLS fingerprint, proxy, cookies, HTTP/2 support",
-		value: "client",
-		dir:   "pkg/client",
-	},
-	{
-		label: "Worker Pool: bounded concurrency via errgroup",
-		value: "worker",
-		dir:   "pkg/worker",
-	},
-	{
-		label: "Retry: exponential backoff with jitter",
-		value: "retry",
-		dir:   "pkg/retry",
-	},
-	{
-		label: "State: file-backed JSON with file locking",
-		value: "state",
-		dir:   "pkg/state",
-	},
-	{
-		label: "Cycle: thread-safe round-robin rotator",
-		value: "cycle",
-		dir:   "pkg/cycle",
-	},
-	{
-		label: "Fake Data: fake data generation helpers",
-		value: "fake",
-		dir:   "pkg/fake",
-	},
-}
-
 // setup holds the user's configuration choices collected from the form.
 type setup struct {
-	docker   bool
-	postgres bool
-	hosting  string
-	packages []string
+	docker    bool
+	postgres  bool
+	pgHosting hosting
+	packages  []int
+	confirm   bool
 }
 
 func main() {
-	var (
-		useDocker    = true
-		usePostgres  = true
-		pgHosting    string
-		selectedPkgs []string
-	)
+	s := setup{
+		docker:   true,
+		postgres: true,
+	}
 
 	err := huh.NewForm(
-		// Infrastructure
 		huh.NewGroup(
 			huh.NewSelect[bool]().
 				Title("Include Docker?").
@@ -80,7 +39,7 @@ func main() {
 					huh.NewOption("Yes", true).Selected(true),
 					huh.NewOption("No", false),
 				).
-				Value(&useDocker),
+				Value(&s.docker),
 
 			huh.NewSelect[bool]().
 				Title("Include PostgreSQL?").
@@ -89,27 +48,35 @@ func main() {
 					huh.NewOption("Yes", true).Selected(true),
 					huh.NewOption("No", false),
 				).
-				Value(&usePostgres),
+				Value(&s.postgres),
 		),
 
-		// PostgreSQL hosting (only when both docker and postgres are enabled)
 		huh.NewGroup(
-			huh.NewSelect[string]().
+			huh.NewSelect[hosting]().
 				Title("PostgreSQL hosting").
 				Options(
-					huh.NewOption("Docker", "docker"),
-					huh.NewOption("External", "external"),
+					huh.NewOption("Docker", hostingDocker),
+					huh.NewOption("External", hostingExternal),
 				).
-				Value(&pgHosting),
+				Value(&s.pgHosting),
 		).WithHideFunc(func() bool {
-			return !usePostgres || !useDocker
+			return !s.postgres || !s.docker
 		}),
 
-		// Optional packages
 		huh.NewGroup(
-			packageSelect(&selectedPkgs),
+			packageSelect(&s.packages),
 		),
-	).WithTheme(huh.ThemeBase()).Run()
+
+		huh.NewGroup(
+			huh.NewSelect[bool]().
+				Title("Apply changes?").
+				Options(
+					huh.NewOption("Apply", true),
+					huh.NewOption("Cancel", false),
+				).
+				Value(&s.confirm),
+		),
+	).WithTheme(theme()).Run()
 
 	if err != nil {
 		if errors.Is(err, huh.ErrUserAborted) {
@@ -119,23 +86,23 @@ func main() {
 		os.Exit(1)
 	}
 
-	apply(setup{
-		docker:   useDocker,
-		postgres: usePostgres,
-		hosting:  pgHosting,
-		packages: selectedPkgs,
-	})
-}
-
-// packageSelect builds a multi-select field for optional packages.
-// All packages are pre-selected (batteries-included default).
-func packageSelect(value *[]string) *huh.MultiSelect[string] {
-	opts := make([]huh.Option[string], len(packages))
-	for i, p := range packages {
-		opts[i] = huh.NewOption(p.label, p.value).Selected(true)
+	if !s.confirm {
+		fmt.Println("setup cancelled")
+		os.Exit(0)
 	}
 
-	return huh.NewMultiSelect[string]().
+	apply(s)
+}
+
+// packageSelect builds a multi-select field from the optionalPackages registry.
+// All packages are pre-selected (batteries-included default).
+func packageSelect(value *[]int) *huh.MultiSelect[int] {
+	opts := make([]huh.Option[int], len(optionalPackages))
+	for i, p := range optionalPackages {
+		opts[i] = huh.NewOption(p.label, i).Selected(true)
+	}
+
+	return huh.NewMultiSelect[int]().
 		Title("Packages to include").
 		Description("Pre-selected. Deselect any you don't need.").
 		Options(opts...).
@@ -144,55 +111,22 @@ func packageSelect(value *[]string) *huh.MultiSelect[string] {
 
 // apply removes disabled features and cleans up the project.
 func apply(s setup) {
-	// Docker
 	if !s.docker {
-		warn(removeFeature(feature{
-			files:    []string{"Dockerfile", "compose.yaml", ".dockerignore"},
-			sections: []section{{file: "Makefile", tag: "docker"}},
-		}))
+		warn(removeFeature(dockerRemoval))
 	}
 
-	// PostgreSQL
 	if !s.postgres {
-		f := feature{
-			dirs: []string{"pkg/db"},
-			sections: []section{
-				{file: "Makefile", tag: "postgres"},
-				{file: "Makefile", tag: "postgres-docker"},
-				{file: ".env.example", tag: "postgres"},
-				{file: "pkg/env/config.go", tag: "postgres"},
-			},
-		}
-		if s.docker {
-			f.compose = []string{"postgres"}
-		}
-		warn(removeFeature(f))
-	} else if !s.docker || s.hosting == "external" {
-		// PostgreSQL kept but forced/chosen external
-		f := feature{
-			sections: []section{
-				{file: "Makefile", tag: "postgres-docker"},
-			},
-		}
-		if s.docker {
-			f.compose = []string{"postgres"}
-		}
-		warn(removeFeature(f))
+		warn(removeFeature(postgresRemoval))
+	} else if !s.docker || s.pgHosting == hostingExternal {
+		warn(removeFeature(postgresExternalRemoval))
 	}
 
-	// Packages
-	selected := make(map[string]bool, len(s.packages))
-	for _, p := range s.packages {
-		selected[p] = true
-	}
-
-	for _, p := range packages {
-		if !selected[p.value] {
-			warn(removeFeature(feature{dirs: []string{p.dir}}))
+	for i, p := range optionalPackages {
+		if !slices.Contains(s.packages, i) {
+			warn(removeFeature(p.feature))
 		}
 	}
 
-	// Cleanup
 	warn(removeSelf())
 	warn(tidyModules())
 

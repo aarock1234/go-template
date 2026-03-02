@@ -9,21 +9,6 @@ import (
 	"strings"
 )
 
-// feature describes a set of files, directories, config sections, and compose
-// services to remove when a feature is disabled.
-type feature struct {
-	dirs     []string
-	files    []string
-	sections []section
-	compose  []string
-}
-
-// section identifies a tagged block inside a file (e.g. "# [tag]"..."# [/tag]").
-type section struct {
-	file string
-	tag  string
-}
-
 // removeFeature applies all removal operations for a feature.
 // Individual failures are collected and returned as a joined error.
 func removeFeature(f feature) error {
@@ -48,7 +33,7 @@ func removeFeature(f feature) error {
 	}
 
 	for _, svc := range f.compose {
-		if err := removeComposeService("compose.yaml", svc); err != nil {
+		if err := removeComposeService(fileCompose, svc); err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -72,31 +57,45 @@ func removeFile(path string) error {
 	return nil
 }
 
+var (
+	tagPrefixes = []string{"#", "//"}
+)
+
 // removeMarkedSections removes all lines between "[tag]" and "[/tag]"
 // markers (inclusive) from the file at path. Supports both # and // comment
 // prefixes. Returns nil if the file contains no matching markers.
-func removeMarkedSections(path, tag string) error {
+func removeMarkedSections(path string, t tag) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("read %s: %w", path, err)
 	}
 
-	opens := []string{"# [" + tag + "]", "// [" + tag + "]"}
-	closes := []string{"# [/" + tag + "]", "// [/" + tag + "]"}
+	var (
+		openTags  []string
+		closeTags []string
+	)
 
-	lines := strings.Split(string(data), "\n")
-	var out []string
-	skip := false
+	for _, prefix := range tagPrefixes {
+		openTags = append(openTags, fmt.Sprintf("%s [%s]", prefix, t))
+		closeTags = append(closeTags, fmt.Sprintf("%s [/%s]", prefix, t))
+	}
 
-	for _, line := range lines {
+	var (
+		out   []string
+		skip  = false
+		found = false
+	)
+
+	for line := range strings.SplitSeq(string(data), "\n") {
 		trimmed := strings.TrimSpace(line)
 
-		if slices.Contains(opens, trimmed) {
+		if slices.Contains(openTags, trimmed) {
 			skip = true
+			found = true
 			continue
 		}
 
-		if slices.Contains(closes, trimmed) {
+		if slices.Contains(closeTags, trimmed) {
 			skip = false
 			continue
 		}
@@ -104,6 +103,10 @@ func removeMarkedSections(path, tag string) error {
 		if !skip {
 			out = append(out, line)
 		}
+	}
+
+	if !found {
+		return nil
 	}
 
 	if err := os.WriteFile(path, []byte(strings.Join(out, "\n")), 0644); err != nil {
@@ -117,14 +120,24 @@ func removeMarkedSections(path, tag string) error {
 // Makefile, so go mod tidy will also strip any setup-only dependencies.
 func removeSelf() error {
 	return removeFeature(feature{
-		dirs:     []string{"cmd/setup"},
-		sections: []section{{file: "Makefile", tag: "setup"}},
+		dirs: []string{"cmd/setup"},
+		sections: []section{
+			{
+				file: fileMakefile,
+				tag:  tagSetup,
+			},
+		},
 	})
 }
 
 // tidyModules runs go mod tidy to prune unused dependencies.
 func tidyModules() error {
-	cmd := exec.Command("go", "mod", "tidy")
+	goBin, err := exec.LookPath("go")
+	if err != nil {
+		return fmt.Errorf("find go binary: %w", err)
+	}
+
+	cmd := exec.Command(goBin, "mod", "tidy")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 

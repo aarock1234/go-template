@@ -109,7 +109,7 @@ func WithBrowserPlatform(platform BrowserPlatform) Option {
 // Overrides the browser brand and platform.
 // Default: nil.
 func WithClientHelloID(id utls.ClientHelloID) Option {
-	return func(c *Client) { c.clientHelloID = &id }
+	return func(c *Client) { c.clientHelloID = new(id) }
 }
 
 // WithDefaultHeaderOverrides overrides mimic default headers.

@@ -26,7 +26,11 @@ func main() {
 	}
 
 	if err := run(ctx, config); err != nil {
-		slog.ErrorContext(ctx, "failed to run", "error", err)
+		if cause := context.Cause(ctx); cause != nil {
+			slog.ErrorContext(ctx, "shutting down", "cause", cause)
+		} else {
+			slog.ErrorContext(ctx, "failed to run", "error", err)
+		}
 		os.Exit(1)
 	}
 }

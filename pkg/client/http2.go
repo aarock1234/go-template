@@ -14,7 +14,7 @@ type http2Fingerprint struct {
 }
 
 var (
-	h2FingerprintMac = http2Fingerprint{
+	HTTP2FingerprintMac = http2Fingerprint{
 		InitialWindowSize: 4194304,
 		TransportConnFlow: 10485760,
 		HeaderPriority: &http2.PriorityParam{
@@ -36,7 +36,7 @@ var (
 		},
 	}
 
-	h2FingerprintWindows = http2Fingerprint{
+	HTTP2FingerprintWindows = http2Fingerprint{
 		InitialWindowSize: 65535,
 		TransportConnFlow: 15663105,
 		HeaderPriority: &http2.PriorityParam{
@@ -77,7 +77,7 @@ const (
 	maxHeaderPriority = 255
 )
 
-func randomH2Fingerprint() http2Fingerprint {
+func RandomHTTP2Fingerprint() http2Fingerprint {
 	initialWindowSize := rand.Uint32N(maxInitialWindowSize-minInitialWindowSize) + minInitialWindowSize
 	transportConnFlow := rand.Uint32N(maxTransportConnFlow-minTransportConnFlow) + minTransportConnFlow
 	headerPriority := rand.IntN(maxHeaderPriority-minHeaderPriority) + minHeaderPriority

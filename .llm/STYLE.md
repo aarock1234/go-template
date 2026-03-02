@@ -2,7 +2,7 @@
 
 Project-agnostic Go style guide. Favor idiomatic Go over clever abstractions.
 
-**Minimum Go version**: 1.22+ (examples use range-over-int, per-iteration loop variables, enhanced ServeMux routing, and iterators from 1.23+).
+**Minimum Go version**: 1.23+ (examples use range-over-int, per-iteration loop variables, enhanced ServeMux routing, and iterators).
 **Recommended Go version**: 1.26.0 (latest stable version)
 
 ## Philosophy
@@ -16,6 +16,7 @@ Write boring code. Prefer explicit over implicit. Optimize for reading, not writ
 ```bash
 go vet ./...                 # static analysis
 gofmt -l .                   # check formatting
+go fix ./...                 # modernize code
 go mod tidy                  # sync dependencies
 go test ./...                # run all tests
 go test -race ./...          # with race detection
@@ -51,13 +52,13 @@ Side-effect imports (`_`) go in a fourth group so `gofmt` won't sort them into t
 | Unexported     | camelCase                           | `processItem`, `defaultTimeout`     |
 | Interfaces     | PascalCase; `-er` for single-method | `Reader`, `Writer`, `Processor`     |
 | Constants      | PascalCase                          | `DefaultTimeout`, `MaxRetries`      |
-| Acronyms       | Consistent case                     | `userID`, `client`, `Client`        |
+| Acronyms       | All-caps both cases                 | `userID`, `HTTPClient`, `parseURL`  |
 | Files          | snake_case                          | `item_service.go`, `http_client.go` |
 | Packages       | lowercase, single-word              | `rotate`, `auth`, `client`          |
 
 ### Package Naming
 
-Short, lowercase, single-word. Name packages after the domain or concept they represent. The package name is part of the API — it provides context to everything it exports, so design the two together.
+Short, lowercase, single-word. Name packages after the domain or concept they represent. The package name is part of the API; it provides context to everything it exports, so design the two together.
 
 ```go
 // GOOD: short, descriptive, domain-oriented
@@ -72,18 +73,18 @@ package common
 package httpHelpers
 ```
 
-Avoid stuttering — the package name and its exports are read together. Let the package name carry context so exports don't repeat it.
+Avoid stuttering; the package name and its exports are read together. Let the package name carry context so exports don't repeat it.
 
 ```go
 // GOOD: reads naturally
 rotate.File       // not rotate.FileRotator
-http.Client       // not http.Client
+http.Client       // not http.HTTPClient
 auth.Token        // not auth.AuthToken
 
 // BAD: package name repeated in export
 rotate.FileRotator
 auth.AuthToken
-http.Client
+http.HTTPClient
 ```
 
 ## Error Handling
@@ -103,10 +104,10 @@ func (s *Service) Get(ctx context.Context, id string) (*Item, error) {
 }
 ```
 
-Error messages: lowercase, no punctuation, add context. Handle an error or propagate it — never both. Logging and returning creates duplicate noise up the call chain.
+Error messages: lowercase, no punctuation, add context. Handle an error or propagate it; never both. Logging and returning creates duplicate noise up the call chain.
 
 ```go
-// BAD: logs and returns — caller will likely log again
+// BAD: logs and returns; caller will likely log again
 if err != nil {
     s.logger.Error("failed to get item", "error", err)
     return nil, fmt.Errorf("get item: %w", err)
@@ -136,7 +137,7 @@ if errors.Is(err, ErrNotFound) {
 
 ### Custom Error Types
 
-For errors that carry additional data. Check with `errors.As`.
+For errors that carry additional data. Check with `errors.AsType`.
 
 ```go
 type ValidationError struct {
@@ -149,8 +150,7 @@ func (e *ValidationError) Error() string {
 }
 
 // Usage
-var valErr *ValidationError
-if errors.As(err, &valErr) {
+if valErr, ok := errors.AsType[*ValidationError](err); ok {
     log.Error("validation failed", "field", valErr.Field)
 }
 ```
@@ -178,7 +178,27 @@ default:
 
 ## Struct Patterns
 
+### Struct Literal Formatting
+
+Always use multi-line format for struct literals with two or more fields. Single-line is only acceptable for one field.
+
+```go
+// GOOD: single field, inline is fine
+item := Item{ID: "abc"}
+
+// GOOD: multiple fields, one per line
+item := Item{
+    ID:   "abc",
+    Name: "example",
+}
+
+// BAD: multiple fields crammed on one line
+item := Item{ID: "abc", Name: "example"}
+```
+
 ### Constructor Pattern
+
+Name constructors `New` as the package name already provides context. Callers read `service.New(...)`, not `service.NewService(...)`. This applies to the primary type in a package.
 
 ```go
 type Service struct {
@@ -187,7 +207,7 @@ type Service struct {
     timeout time.Duration
 }
 
-func NewService(repo Repository, logger *slog.Logger) *Service {
+func New(repo Repository, logger *slog.Logger) *Service {
     return &Service{
         repo:    repo,
         logger:  logger,
@@ -207,7 +227,7 @@ func WithTimeout(d time.Duration) Option {
     return func(s *Service) { s.timeout = d }
 }
 
-func NewService(repo Repository, opts ...Option) *Service {
+func New(repo Repository, opts ...Option) *Service {
     s := &Service{
         repo:    repo,
         timeout: 10 * time.Second,
@@ -220,7 +240,7 @@ func NewService(repo Repository, opts ...Option) *Service {
 }
 
 // Usage
-svc := NewService(repo, WithTimeout(5*time.Second))
+svc := New(repo, WithTimeout(5*time.Second))
 ```
 
 ### Struct Embedding
@@ -237,6 +257,7 @@ func (b *BaseProcessor) Validate(input Input) error {
     if input.ID == "" {
         return errors.New("input id required")
     }
+
     return nil
 }
 
@@ -310,14 +331,20 @@ type Sizer interface {
     Size() int
 }
 
-func Largest[T Sizer](items []T) T {
+func Largest[T Sizer](items []T) (T, bool) {
+    var zero T
+    if len(items) == 0 {
+        return zero, false
+    }
+
     max := items[0]
     for _, item := range items[1:] {
         if item.Size() > max.Size() {
             max = item
         }
     }
-    return max
+
+    return max, true
 }
 
 // GOOD: interface constraints
@@ -331,6 +358,7 @@ func FindItem[T HasID](items []T, id string) *T {
             return &items[i]
         }
     }
+
     return nil
 }
 
@@ -349,6 +377,7 @@ func SortByCreation[T interface{ Identifiable; Timestamped }](items []T) []T {
     sort.Slice(sorted, func(i, j int) bool {
         return sorted[i].GetCreatedAt().Before(sorted[j].GetCreatedAt())
     })
+
     return sorted
 }
 
@@ -359,13 +388,14 @@ type Pair[K, V any] struct {
 }
 
 // ACCEPTABLE: generic utility functions reduce boilerplate for
-// common transformations. Use judiciously — a plain for loop
+// common transformations. Use judiciously; a plain for loop
 // is often clearer for simple cases.
 func Map[T, U any](items []T, fn func(T) U) []U {
     result := make([]U, len(items))
     for i, item := range items {
         result[i] = fn(item)
     }
+
     return result
 }
 
@@ -376,6 +406,7 @@ func Filter[T any](items []T, predicate func(T) bool) []T {
             result = append(result, item)
         }
     }
+
     return result
 }
 
@@ -429,9 +460,10 @@ func Handle(data map[string]any) error {
 
 // GOOD: struct types
 type Request struct {
-    Name  string `json:"name"`
-    Age   int    `json:"age"`
-    Email string `json:"email,omitempty"`
+    Name      string    `json:"name"`
+    Age       int       `json:"age,omitzero"`
+    Email     string    `json:"email,omitempty"`
+    CreatedAt time.Time `json:"created_at,omitzero"`
 }
 
 func Handle(req Request) error {
@@ -440,6 +472,30 @@ func Handle(req Request) error {
 ```
 
 Only use `map[string]any` when structure is truly dynamic (plugin configs, user-defined metadata).
+
+### Optional Pointer Fields
+
+Go 1.26 extended `new` to accept an expression, eliminating the need to declare a variable just to take its address. Use this for optional pointer fields in structs.
+
+```go
+type Person struct {
+    Name string `json:"name"`
+    Age  *int   `json:"age,omitempty"`
+}
+
+// GOOD: inline with new(expr)
+p := Person{
+    Name: name,
+    Age:  new(yearsSince(born)),
+}
+
+// BAD: unnecessary intermediate variable
+age := yearsSince(born)
+p := Person{
+    Name: name,
+    Age:  &age,
+}
+```
 
 ### Interface Design
 
@@ -456,7 +512,7 @@ type Service struct {
     repo Repository  // accepts interface
 }
 
-func NewService(repo Repository) *Service {  // returns concrete type
+func New(repo Repository) *Service {  // returns concrete type
     return &Service{
         repo: repo,
     }
@@ -495,6 +551,12 @@ var _ Repository = (*PostgresRepo)(nil)  // compile-time check
 
 Prefer synchronization primitives over channels for simple mutual exclusion. Channels are for communication and orchestration; `sync.Mutex` is for protecting shared state. Using the simpler tool makes intent clearer.
 
+**When to use which pattern:**
+
+- **errgroup**: default choice for bounded concurrent work with shared error handling
+- **Worker pool**: when you need explicit concurrency limits for resource-sensitive operations (DB connections, rate-limited APIs)
+- **Result channels**: when goroutines produce heterogeneous values you need to collect individually
+
 ### Worker Pool
 
 ```go
@@ -505,15 +567,13 @@ func (s *Service) ProcessBatch(ctx context.Context, items []Item) error {
 
     // Start workers
     for i := 0; i < concurrency; i++ {
-        wg.Add(1)
-        go func() {
-            defer wg.Done()
+        wg.Go(func() {
             for item := range taskCh {
                 if err := s.process(ctx, item); err != nil {
                     s.logger.Error("process failed", "error", err)
                 }
             }
-        }()
+        })
     }
 
     // Send work
@@ -529,6 +589,7 @@ func (s *Service) ProcessBatch(ctx context.Context, items []Item) error {
     }()
 
     wg.Wait()
+
     return ctx.Err()
 }
 
@@ -590,7 +651,6 @@ import "golang.org/x/sync/errgroup"
 
 func (s *Service) ProcessAll(ctx context.Context, items []Item) error {
     g, ctx := errgroup.WithContext(ctx)
-
     for _, item := range items {
         g.Go(func() error {
             return s.process(ctx, item)
@@ -610,13 +670,19 @@ type Cycle[T any] struct {
     mu    sync.Mutex
 }
 
-func (c *Cycle[T]) Next() T {
+func (c *Cycle[T]) Next() (T, bool) {
     c.mu.Lock()
     defer c.mu.Unlock()
 
+    if len(c.items) == 0 {
+        var zero T
+        return zero, false
+    }
+
     item := c.items[c.index]
     c.index = (c.index + 1) % len(c.items)
-    return item
+
+    return item, true
 }
 ```
 
@@ -645,7 +711,7 @@ type Client struct {
     proxy *url.URL
 }
 
-func NewClient(proxy *url.URL) (*Client, error) {
+func New(proxy *url.URL) (*Client, error) {
     client, err := newClient(proxy)
     if err != nil {
         return nil, fmt.Errorf("creating http client: %w", err)
@@ -655,6 +721,10 @@ func NewClient(proxy *url.URL) (*Client, error) {
         inner: client,
         proxy: proxy,
     }, nil
+}
+
+func (c *Client) Do(req *http.Request) (*http.Response, error) {
+    return c.inner.Do(req)
 }
 
 func newClient(proxy *url.URL) (*http.Client, error) {
@@ -751,42 +821,48 @@ type APIClient struct {
     baseURL string
 }
 
-func NewAPIClient(baseURL string, proxy *url.URL) (*APIClient, error) {
-    client, err := client.NewClient(proxy)
+func New(baseURL string, proxy *url.URL) (*APIClient, error) {
+    c, err := client.New(proxy)
     if err != nil {
         return nil, fmt.Errorf("creating http client: %w", err)
     }
 
     return &APIClient{
-        http:    client,
+        http:    c,
         baseURL: baseURL,
     }, nil
 }
 
-func (c *APIClient) Get(ctx context.Context, path string, response any) error {
+// doRequest is a generic top-level function because Go does not support
+// generic methods. This avoids `any` in the public API; the caller
+// gets a fully typed *T back with no type assertions.
+func doRequest[T any](ctx context.Context, c *APIClient, path string) (*T, error) {
     req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+path, nil)
     if err != nil {
-        return fmt.Errorf("creating request: %w", err)
+        return nil, fmt.Errorf("creating request: %w", err)
     }
-
     req.Header.Set("Accept", "application/json")
 
-    res, err := c.http.inner.Do(req)
+    res, err := c.http.Do(req)
     if err != nil {
-        return fmt.Errorf("executing request: %w", err)
+        return nil, fmt.Errorf("executing request: %w", err)
     }
     defer res.Body.Close()
 
     if res.StatusCode != http.StatusOK {
-        return fmt.Errorf("unexpected status: %d", res.StatusCode)
+        return nil, fmt.Errorf("unexpected status: %d", res.StatusCode)
     }
 
-    if err := json.NewDecoder(res.Body).Decode(response); err != nil {
-        return fmt.Errorf("decoding response: %w", err)
+    var result T
+    if err := json.NewDecoder(res.Body).Decode(&result); err != nil {
+        return nil, fmt.Errorf("decoding response: %w", err)
     }
 
-    return nil
+    return &result, nil
 }
+
+// Usage
+item, err := doRequest[Item](ctx, client, "/items/123")
 ```
 
 ## Code Organization
@@ -806,7 +882,7 @@ project/
     └── log/                # side-effect init
 ```
 
-`pkg/` is the default for all project packages. Only use `internal/` when the module is published for external consumers — this will be explicitly communicated.
+`pkg/` is the default for all project packages. Only use `internal/` when the module is published for external consumers; this will be explicitly communicated.
 
 ### Layered Architecture
 
@@ -823,7 +899,7 @@ type PgRepo struct {
     logger *slog.Logger
 }
 
-func NewRepository(db *sql.DB, logger *slog.Logger) *PgRepo {
+func New(db *sql.DB, logger *slog.Logger) *PgRepo {
     return &PgRepo{
         db:     db,
         logger: logger,
@@ -839,7 +915,7 @@ type Service struct {
     logger *slog.Logger
 }
 
-func NewService(repo Repository, logger *slog.Logger) *Service {
+func New(repo Repository, logger *slog.Logger) *Service {
     return &Service{
         repo:   repo,
         logger: logger,
@@ -866,7 +942,7 @@ type Handler struct {
     logger  *slog.Logger
 }
 
-func NewHandler(service *Service, logger *slog.Logger) *Handler {
+func New(service *Service, logger *slog.Logger) *Handler {
     return &Handler{
         service: service,
         logger:  logger,
@@ -952,7 +1028,7 @@ func (s *Service) Process(ctx context.Context, id string) error {
 }
 ```
 
-Use `context.Background()` at the top of call chains (`main()`, test setup). Use `context.TODO()` as a placeholder when unsure which context to use. Never pass `nil` — use `context.TODO()` instead.
+Use `context.Background()` at the top of call chains (`main()`, test setup). Use `context.TODO()` as a placeholder when unsure which context to use. Never pass `nil`; use `context.TODO()` instead.
 
 ## Logging
 
@@ -1002,7 +1078,7 @@ s.logger.ErrorContext(ctx, "failed to save",
 
 ## Constants and Enums
 
-Use typed constants for enum behavior. Use `iota` for sequential integers.
+Use typed constants for enum behavior. Prefer string-based enums when values are serialized, logged, or displayed; they're self-documenting. Use integer enums with `iota` when values are purely internal or performance-critical.
 
 ```go
 // String-based enum
@@ -1067,7 +1143,7 @@ for key, item := range store.All() {
 Compose iterators for lazy transformation chains instead of allocating intermediate slices.
 
 ```go
-// Lazy filtering — no intermediate allocation
+// Lazy filtering; no intermediate allocation
 func FilterIter[V any](seq iter.Seq[V], pred func(V) bool) iter.Seq[V] {
     return func(yield func(V) bool) {
         for v := range seq {
@@ -1084,20 +1160,6 @@ func FilterIter[V any](seq iter.Seq[V], pred func(V) bool) iter.Seq[V] {
 for item := range FilterIter(mySet.All(), isActive) {
     process(item)
 }
-```
-
-## Testing
-
-See [TESTING.md](TESTING.md) for comprehensive testing patterns.
-
-Quick commands:
-
-```bash
-go test ./...                     # all tests
-go test -v ./pkg/storage/...      # verbose, specific package
-go test -run TestName ./...       # specific test
-go test -race ./...               # race detection
-go test -cover ./...              # coverage
 ```
 
 ## Development Workflow
@@ -1161,7 +1223,43 @@ go vet ./... && gofmt -l .   # combine checks
 - In pre-commit hooks
 - In CI/CD before running tests
 
+If the project includes a `golangci-lint` configuration, use `golangci-lint run` instead of invoking individual tools; it aggregates `go vet`, formatting checks, and additional linters into a single pass.
+
+Run `go fix ./...` periodically to modernize code — it rewrites to use the latest Go idioms and stdlib APIs automatically.
+
 ## Additional Conventions
+
+### Newline Spacing
+
+Use blank lines to separate logical groups within a function body. A `return` statement should always have a preceding blank line. Closely related statements; a variable definition and the loop or condition that immediately uses it, a fetch and the single assignment from it; stay together with no blank line. If three or more ungrouped statements stack up, split them into logical pairs.
+
+```go
+// GOOD: grouped by intent, return has breathing room
+func Process(ctx context.Context, items []Item) (int, error) {
+    total := 0
+    for _, item := range items {
+        total += item.Value
+    }
+
+    if err := validate(total); err != nil {
+        return 0, fmt.Errorf("validating total: %w", err)
+    }
+
+    return total, nil
+}
+
+// BAD: everything jammed together
+func Process(ctx context.Context, items []Item) (int, error) {
+    total := 0
+    for _, item := range items {
+        total += item.Value
+    }
+    if err := validate(total); err != nil {
+        return 0, fmt.Errorf("validating total: %w", err)
+    }
+    return total, nil
+}
+```
 
 ### Doc Comments
 
@@ -1175,6 +1273,20 @@ type Service struct { ... }
 // an error if the item fails validation or cannot be saved.
 func (s *Service) Process(ctx context.Context, item *Item) error { ... }
 ```
+
+### Pointer vs Value Receivers
+
+Use pointer receivers when the method mutates state, the struct is large, or for consistency when other methods on the type use pointer receivers. Use value receivers for small, immutable types like enums or thin wrappers.
+
+```go
+// Pointer: mutates state or large struct
+func (s *Service) Process(ctx context.Context, id string) error { ... }
+
+// Value: small, immutable type
+func (s Status) String() string { return string(s) }
+```
+
+If any method on a type uses a pointer receiver, all methods on that type should use pointer receivers for consistency.
 
 ### Receiver Naming
 
@@ -1192,7 +1304,7 @@ func (self *Service) Save(...) { ... }
 
 ### Graceful Shutdown
 
-Production servers should handle OS signals for clean shutdown.
+Production servers should handle OS signals for clean shutdown. Since Go 1.26, `signal.NotifyContext` sets the cancel cause to the received signal, accessible via `context.Cause`.
 
 ```go
 func main() {

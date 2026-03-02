@@ -19,7 +19,7 @@ setup: ## Interactive project setup
 .PHONY: up down watch
 # [/docker]
 
-.PHONY: generate lint format test build dev
+.PHONY: generate fix lint format test build dev
 
 # [docker]
 up:
@@ -57,6 +57,9 @@ migrate-new:
 # Go Commands
 generate:
 	go generate ./...
+
+fix:
+	go fix ./...
 
 lint:
 	go vet ./...

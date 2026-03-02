@@ -102,7 +102,7 @@ func (r *FileRotator) load() error {
 	fileData = bytes.ReplaceAll(fileData, []byte("\r"), []byte(""))
 
 	r.lines = []string{}
-	for _, line := range bytes.Split(fileData, []byte("\n")) {
+	for line := range bytes.SplitSeq(fileData, []byte("\n")) {
 		trimmed := bytes.TrimSpace(line)
 		if len(trimmed) == 0 {
 			continue
