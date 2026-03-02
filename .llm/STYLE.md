@@ -3,6 +3,7 @@
 Project-agnostic Go style guide. Favor idiomatic Go over clever abstractions.
 
 **Minimum Go version**: 1.22+ (examples use range-over-int, per-iteration loop variables, enhanced ServeMux routing, and iterators from 1.23+).
+**Recommended Go version**: 1.26.0 (latest stable version)
 
 ## Philosophy
 
@@ -44,15 +45,15 @@ Side-effect imports (`_`) go in a fourth group so `gofmt` won't sort them into t
 
 ### Naming Conventions
 
-| Category       | Convention               | Examples                            |
-| -------------- | ------------------------ | ----------------------------------- |
-| Exported types | PascalCase               | `Storage`, `UserEvent`, `UserID`    |
-| Unexported     | camelCase                | `processItem`, `defaultTimeout`     |
+| Category       | Convention                          | Examples                            |
+| -------------- | ----------------------------------- | ----------------------------------- |
+| Exported types | PascalCase                          | `Storage`, `UserEvent`, `UserID`    |
+| Unexported     | camelCase                           | `processItem`, `defaultTimeout`     |
 | Interfaces     | PascalCase; `-er` for single-method | `Reader`, `Writer`, `Processor`     |
-| Constants      | PascalCase               | `DefaultTimeout`, `MaxRetries`      |
-| Acronyms       | Consistent case          | `userID`, `client`, `Client` |
-| Files          | snake_case               | `item_service.go`, `http_client.go` |
-| Packages       | lowercase, single-word   | `rotate`, `auth`, `client`          |
+| Constants      | PascalCase                          | `DefaultTimeout`, `MaxRetries`      |
+| Acronyms       | Consistent case                     | `userID`, `client`, `Client`        |
+| Files          | snake_case                          | `item_service.go`, `http_client.go` |
+| Packages       | lowercase, single-word              | `rotate`, `auth`, `client`          |
 
 ### Package Naming
 
@@ -97,6 +98,7 @@ func (s *Service) Get(ctx context.Context, id string) (*Item, error) {
     if err != nil {
         return nil, fmt.Errorf("get item %s: %w", id, err)
     }
+
     return item, nil
 }
 ```
@@ -206,10 +208,14 @@ func WithTimeout(d time.Duration) Option {
 }
 
 func NewService(repo Repository, opts ...Option) *Service {
-    s := &Service{repo: repo, timeout: 10 * time.Second}
+    s := &Service{
+        repo:    repo,
+        timeout: 10 * time.Second,
+    }
     for _, opt := range opts {
         opt(s)
     }
+
     return s
 }
 
@@ -451,7 +457,9 @@ type Service struct {
 }
 
 func NewService(repo Repository) *Service {  // returns concrete type
-    return &Service{repo: repo}
+    return &Service{
+        repo: repo,
+    }
 }
 ```
 
@@ -566,7 +574,10 @@ func (s *Service) FetchBoth(ctx context.Context, id string) (*Data, error) {
         }
     }
 
-    return &Data{One: *r1, Two: *r2}, nil
+    return &Data{
+        One: *r1,
+        Two: *r2,
+    }, nil
 }
 
 // For simple parallel fetches like this, errgroup (below) is often cleaner.
@@ -813,7 +824,10 @@ type PgRepo struct {
 }
 
 func NewRepository(db *sql.DB, logger *slog.Logger) *PgRepo {
-    return &PgRepo{db: db, logger: logger}
+    return &PgRepo{
+        db:     db,
+        logger: logger,
+    }
 }
 ```
 
@@ -826,7 +840,10 @@ type Service struct {
 }
 
 func NewService(repo Repository, logger *slog.Logger) *Service {
-    return &Service{repo: repo, logger: logger}
+    return &Service{
+        repo:   repo,
+        logger: logger,
+    }
 }
 
 func (s *Service) Process(ctx context.Context, id string) error {
@@ -850,7 +867,10 @@ type Handler struct {
 }
 
 func NewHandler(service *Service, logger *slog.Logger) *Handler {
-    return &Handler{service: service, logger: logger}
+    return &Handler{
+        service: service,
+        logger:  logger,
+    }
 }
 
 func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
@@ -1179,22 +1199,25 @@ func main() {
     ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
     defer stop()
 
-    server := &http.Server{Addr: ":8080", Handler: mux}
+    server := &http.Server{
+        Addr:    ":8080",
+        Handler: mux,
+    }
 
     go func() {
         if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-            slog.Error("server error", "error", err)
+            slog.ErrorContext(ctx, "server error", "error", err)
         }
     }()
 
     <-ctx.Done()
-    slog.Info("shutting down")
+    slog.InfoContext(ctx, "shutting down")
 
     shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
     defer cancel()
 
     if err := server.Shutdown(shutdownCtx); err != nil {
-        slog.Error("shutdown error", "error", err)
+        slog.ErrorContext(ctx, "shutdown error", "error", err)
     }
 }
 ```

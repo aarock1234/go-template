@@ -1,12 +1,13 @@
-// setup configures a freshly scaffolded project by stripping unused
-// infrastructure based on user input. Source files use comment markers
-// (e.g. "# [tag]" / "# [/tag]" or "// [tag]" / "// [/tag]") to delimit
+// Package main implements the setup command, which configures a freshly
+// scaffolded project by stripping unused infrastructure based on user input.
+// Source files use comment markers (e.g. "# [tag]" / "# [/tag]") to delimit
 // feature-specific blocks that can be cleanly removed.
 //
 // Run with: go run ./cmd/setup
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
@@ -53,6 +54,14 @@ var packages = []pkg{
 	},
 }
 
+// setup holds the user's configuration choices collected from the form.
+type setup struct {
+	docker   bool
+	postgres bool
+	hosting  string
+	packages []string
+}
+
 func main() {
 	var (
 		useDocker    = true
@@ -68,7 +77,7 @@ func main() {
 				Title("Include Docker?").
 				Description("Multi-stage Dockerfile, compose for dev, hot reload").
 				Options(
-					huh.NewOption("Yes", true),
+					huh.NewOption("Yes", true).Selected(true),
 					huh.NewOption("No", false),
 				).
 				Value(&useDocker),
@@ -77,7 +86,7 @@ func main() {
 				Title("Include PostgreSQL?").
 				Description("pgx pool, sqlc queries, goose migrations").
 				Options(
-					huh.NewOption("Yes", true),
+					huh.NewOption("Yes", true).Selected(true),
 					huh.NewOption("No", false),
 				).
 				Value(&usePostgres),
@@ -88,8 +97,8 @@ func main() {
 			huh.NewSelect[string]().
 				Title("PostgreSQL hosting").
 				Options(
-					huh.NewOption("Docker (bundled in compose)", "docker"),
-					huh.NewOption("External (bring your own)", "external"),
+					huh.NewOption("Docker", "docker"),
+					huh.NewOption("External", "external"),
 				).
 				Value(&pgHosting),
 		).WithHideFunc(func() bool {
@@ -100,17 +109,22 @@ func main() {
 		huh.NewGroup(
 			packageSelect(&selectedPkgs),
 		),
-	).Run()
+	).WithTheme(huh.ThemeBase()).Run()
 
 	if err != nil {
-		if err == huh.ErrUserAborted {
+		if errors.Is(err, huh.ErrUserAborted) {
 			os.Exit(130)
 		}
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
 
-	apply(useDocker, usePostgres, pgHosting, selectedPkgs)
+	apply(setup{
+		docker:   useDocker,
+		postgres: usePostgres,
+		hosting:  pgHosting,
+		packages: selectedPkgs,
+	})
 }
 
 // packageSelect builds a multi-select field for optional packages.
@@ -129,9 +143,9 @@ func packageSelect(value *[]string) *huh.MultiSelect[string] {
 }
 
 // apply removes disabled features and cleans up the project.
-func apply(useDocker, usePostgres bool, pgHosting string, selectedPkgs []string) {
+func apply(s setup) {
 	// Docker
-	if !useDocker {
+	if !s.docker {
 		warn(removeFeature(feature{
 			files:    []string{"Dockerfile", "compose.yaml", ".dockerignore"},
 			sections: []section{{file: "Makefile", tag: "docker"}},
@@ -139,7 +153,7 @@ func apply(useDocker, usePostgres bool, pgHosting string, selectedPkgs []string)
 	}
 
 	// PostgreSQL
-	if !usePostgres {
+	if !s.postgres {
 		f := feature{
 			dirs: []string{"pkg/db"},
 			sections: []section{
@@ -149,26 +163,26 @@ func apply(useDocker, usePostgres bool, pgHosting string, selectedPkgs []string)
 				{file: "pkg/env/config.go", tag: "postgres"},
 			},
 		}
-		if useDocker {
+		if s.docker {
 			f.compose = []string{"postgres"}
 		}
 		warn(removeFeature(f))
-	} else if !useDocker || pgHosting == "external" {
+	} else if !s.docker || s.hosting == "external" {
 		// PostgreSQL kept but forced/chosen external
 		f := feature{
 			sections: []section{
 				{file: "Makefile", tag: "postgres-docker"},
 			},
 		}
-		if useDocker {
+		if s.docker {
 			f.compose = []string{"postgres"}
 		}
 		warn(removeFeature(f))
 	}
 
 	// Packages
-	selected := make(map[string]bool, len(selectedPkgs))
-	for _, p := range selectedPkgs {
+	selected := make(map[string]bool, len(s.packages))
+	for _, p := range s.packages {
 		selected[p] = true
 	}
 
