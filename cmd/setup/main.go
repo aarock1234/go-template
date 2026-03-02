@@ -28,6 +28,7 @@ func main() {
 	s := setup{
 		docker:   true,
 		postgres: true,
+		confirm:  true,
 	}
 
 	err := huh.NewForm(
