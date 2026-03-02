@@ -47,11 +47,6 @@ var packages = []pkg{
 		dir:   "pkg/cycle",
 	},
 	{
-		label: "Fake: fake data generation helpers",
-		value: "fake",
-		dir:   "pkg/fake",
-	},
-	{
 		label: "Fake Data: fake data generation helpers",
 		value: "fake",
 		dir:   "pkg/fake",
@@ -69,14 +64,22 @@ func main() {
 	err := huh.NewForm(
 		// Infrastructure
 		huh.NewGroup(
-			huh.NewConfirm().
+			huh.NewSelect[bool]().
 				Title("Include Docker?").
 				Description("Multi-stage Dockerfile, compose for dev, hot reload").
+				Options(
+					huh.NewOption("Yes", true),
+					huh.NewOption("No", false),
+				).
 				Value(&useDocker),
 
-			huh.NewConfirm().
+			huh.NewSelect[bool]().
 				Title("Include PostgreSQL?").
 				Description("pgx pool, sqlc queries, goose migrations").
+				Options(
+					huh.NewOption("Yes", true),
+					huh.NewOption("No", false),
+				).
 				Value(&usePostgres),
 		),
 
@@ -85,8 +88,8 @@ func main() {
 			huh.NewSelect[string]().
 				Title("PostgreSQL hosting").
 				Options(
-					huh.NewOption("Docker - bundled in compose", "docker"),
-					huh.NewOption("External - bring your own", "external"),
+					huh.NewOption("Docker (bundled in compose)", "docker"),
+					huh.NewOption("External (bring your own)", "external"),
 				).
 				Value(&pgHosting),
 		).WithHideFunc(func() bool {
