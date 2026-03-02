@@ -19,7 +19,9 @@ import (
 //	    LogLevel    string `env:"LOG_LEVEL"`
 //	}
 type Config struct {
+	// [postgres]
 	DatabaseURL string `env:"DATABASE_URL,required"`
+	// [/postgres]
 }
 
 // New loads the .env file and returns a Config populated from the environment.

@@ -15,9 +15,13 @@ setup: ## Interactive project setup
 .PHONY: migrate migrate-down migrate-new
 # [/postgres]
 
-.PHONY: up down watch generate lint format test build dev
+# [docker]
+.PHONY: up down watch
+# [/docker]
 
-# Docker Commands
+.PHONY: generate lint format test build dev
+
+# [docker]
 up:
 	docker compose --profile postgres up -d
 
@@ -26,6 +30,7 @@ down:
 
 watch:
 	docker compose watch
+# [/docker]
 
 # [postgres-docker]
 # Database

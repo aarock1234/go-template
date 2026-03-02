@@ -1,71 +1,190 @@
 // setup configures a freshly scaffolded project by stripping unused
 // infrastructure based on user input. Source files use comment markers
-// (e.g. "# [postgres]" / "# [/postgres]") to delimit feature-specific
-// blocks that can be cleanly removed.
+// (e.g. "# [tag]" / "# [/tag]" or "// [tag]" / "// [/tag]") to delimit
+// feature-specific blocks that can be cleanly removed.
 //
 // Run with: go run ./cmd/setup
 package main
 
 import (
-	"bufio"
-	"context"
 	"fmt"
-	"log/slog"
 	"os"
-	"strings"
 
-	_ "github.com/aarock1234/go-template/pkg/log" // colorized slog
+	"github.com/charmbracelet/huh"
 )
 
-var scanner = bufio.NewScanner(os.Stdin)
+// pkg maps an optional package to its directory for removal.
+type pkg struct {
+	label string
+	value string
+	dir   string
+}
+
+var packages = []pkg{
+	{
+		label: "HTTP Client: TLS fingerprint, proxy, cookies, HTTP/2 support",
+		value: "client",
+		dir:   "pkg/client",
+	},
+	{
+		label: "Worker Pool: bounded concurrency via errgroup",
+		value: "worker",
+		dir:   "pkg/worker",
+	},
+	{
+		label: "Retry: exponential backoff with jitter",
+		value: "retry",
+		dir:   "pkg/retry",
+	},
+	{
+		label: "State: file-backed JSON with file locking",
+		value: "state",
+		dir:   "pkg/state",
+	},
+	{
+		label: "Cycle: thread-safe round-robin rotator",
+		value: "cycle",
+		dir:   "pkg/cycle",
+	},
+	{
+		label: "Fake: fake data generation helpers",
+		value: "fake",
+		dir:   "pkg/fake",
+	},
+	{
+		label: "Fake Data: fake data generation helpers",
+		value: "fake",
+		dir:   "pkg/fake",
+	},
+}
 
 func main() {
-	ctx := context.Background()
+	var (
+		useDocker    = true
+		usePostgres  = true
+		pgHosting    string
+		selectedPkgs []string
+	)
 
-	configurePostgres(ctx)
-	// future: configureRedis(ctx), configureAuth(ctx), etc.
+	err := huh.NewForm(
+		// Infrastructure
+		huh.NewGroup(
+			huh.NewConfirm().
+				Title("Include Docker?").
+				Description("Multi-stage Dockerfile, compose for dev, hot reload").
+				Value(&useDocker),
 
-	removeSelf(ctx)
-	tidyModules(ctx)
-}
+			huh.NewConfirm().
+				Title("Include PostgreSQL?").
+				Description("pgx pool, sqlc queries, goose migrations").
+				Value(&usePostgres),
+		),
 
-// ask prints a question and returns the trimmed response.
-func ask(q string) string {
-	fmt.Print(q)
-	scanner.Scan()
-	return strings.TrimSpace(scanner.Text())
-}
+		// PostgreSQL hosting (only when both docker and postgres are enabled)
+		huh.NewGroup(
+			huh.NewSelect[string]().
+				Title("PostgreSQL hosting").
+				Options(
+					huh.NewOption("Docker - bundled in compose", "docker"),
+					huh.NewOption("External - bring your own", "external"),
+				).
+				Value(&pgHosting),
+		).WithHideFunc(func() bool {
+			return !usePostgres || !useDocker
+		}),
 
-// configurePostgres prompts the user for PostgreSQL preferences and strips
-// unused postgres infrastructure accordingly.
-func configurePostgres(ctx context.Context) {
-	if !strings.EqualFold(ask("Use PostgreSQL? [y/N] "), "y") {
-		if err := removeDir("pkg/db"); err != nil {
-			slog.ErrorContext(ctx, "remove directory", "error", err)
+		// Optional packages
+		huh.NewGroup(
+			packageSelect(&selectedPkgs),
+		),
+	).Run()
+
+	if err != nil {
+		if err == huh.ErrUserAborted {
+			os.Exit(130)
 		}
-		if err := removeComposeService("compose.yaml", "postgres"); err != nil {
-			slog.ErrorContext(ctx, "remove compose service", "error", err)
-		}
-		if err := removeMarkedSections("Makefile", "postgres"); err != nil {
-			slog.ErrorContext(ctx, "remove makefile sections", "error", err)
-		}
-		if err := removeMarkedSections(".env.example", "postgres"); err != nil {
-			slog.ErrorContext(ctx, "remove env sections", "error", err)
-		}
-		slog.InfoContext(ctx, "removed all postgresql infrastructure")
-		return
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
 	}
 
-	if strings.EqualFold(ask("Docker or external? [docker/external] "), "external") {
-		if err := removeComposeService("compose.yaml", "postgres"); err != nil {
-			slog.ErrorContext(ctx, "remove compose service", "error", err)
-		}
-		if err := removeMarkedSections("Makefile", "postgres-docker"); err != nil {
-			slog.ErrorContext(ctx, "remove makefile sections", "error", err)
-		}
-		slog.InfoContext(ctx, "configured postgresql for external use")
-		return
+	apply(useDocker, usePostgres, pgHosting, selectedPkgs)
+}
+
+// packageSelect builds a multi-select field for optional packages.
+// All packages are pre-selected (batteries-included default).
+func packageSelect(value *[]string) *huh.MultiSelect[string] {
+	opts := make([]huh.Option[string], len(packages))
+	for i, p := range packages {
+		opts[i] = huh.NewOption(p.label, p.value).Selected(true)
 	}
 
-	slog.InfoContext(ctx, "kept postgresql with docker, no changes")
+	return huh.NewMultiSelect[string]().
+		Title("Packages to include").
+		Description("Pre-selected. Deselect any you don't need.").
+		Options(opts...).
+		Value(value)
+}
+
+// apply removes disabled features and cleans up the project.
+func apply(useDocker, usePostgres bool, pgHosting string, selectedPkgs []string) {
+	// Docker
+	if !useDocker {
+		warn(removeFeature(feature{
+			files:    []string{"Dockerfile", "compose.yaml", ".dockerignore"},
+			sections: []section{{file: "Makefile", tag: "docker"}},
+		}))
+	}
+
+	// PostgreSQL
+	if !usePostgres {
+		f := feature{
+			dirs: []string{"pkg/db"},
+			sections: []section{
+				{file: "Makefile", tag: "postgres"},
+				{file: "Makefile", tag: "postgres-docker"},
+				{file: ".env.example", tag: "postgres"},
+				{file: "pkg/env/config.go", tag: "postgres"},
+			},
+		}
+		if useDocker {
+			f.compose = []string{"postgres"}
+		}
+		warn(removeFeature(f))
+	} else if !useDocker || pgHosting == "external" {
+		// PostgreSQL kept but forced/chosen external
+		f := feature{
+			sections: []section{
+				{file: "Makefile", tag: "postgres-docker"},
+			},
+		}
+		if useDocker {
+			f.compose = []string{"postgres"}
+		}
+		warn(removeFeature(f))
+	}
+
+	// Packages
+	selected := make(map[string]bool, len(selectedPkgs))
+	for _, p := range selectedPkgs {
+		selected[p] = true
+	}
+
+	for _, p := range packages {
+		if !selected[p.value] {
+			warn(removeFeature(feature{dirs: []string{p.dir}}))
+		}
+	}
+
+	// Cleanup
+	warn(removeSelf())
+	warn(tidyModules())
+
+	fmt.Println("\nsetup complete")
+}
+
+// warn prints a non-fatal error to stderr.
+func warn(err error) {
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: %v\n", err)
+	}
 }
