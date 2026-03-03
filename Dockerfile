@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 
 # dev: docker compose watch (go run, full toolchain)
-FROM golang:1.25 AS dev
+FROM golang:1.26 AS dev
 
 WORKDIR /app
 
