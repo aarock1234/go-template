@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -54,7 +55,21 @@ func run(ctx context.Context, config *env.Config) error {
 		return fmt.Errorf("example: %w", err)
 	}
 
-	slog.InfoContext(ctx, "example response", "response", resp)
+	var fingerprint peetPrint
+	if err := json.Unmarshal(resp.ResponseBytes, &fingerprint); err != nil {
+		return fmt.Errorf("unmarshal fingerprint: %w", err)
+	}
+
+	slog.InfoContext(ctx, "example response", "response", fingerprint)
 
 	return nil
+}
+
+type peetPrint struct {
+	TLS peetTLS `json:"tls"`
+}
+
+type peetTLS struct {
+	PeetPrint     string `json:"peetprint"`
+	PeetPrintHash string `json:"peetprint_hash"`
 }

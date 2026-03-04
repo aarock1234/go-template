@@ -688,129 +688,39 @@ func (c *Cycle[T]) Next() (T, bool) {
 
 ## HTTP Client Pattern
 
-Structure: `pkg/client/{client.go, proxies.go, cookies.go}`
+Structure: `pkg/client/` with files: `client.go`, `option.go`, `transport.go`, `h1.go`, `h2.go`, `fingerprint.go`, `header.go`, `cookie.go`, `jar.go`, `decompress.go`, `proxy.go`.
 
-**Note:** This section uses `github.com/enetx/http` (a fork of `net/http`). Adapt imports for your project.
+Uses standard `net/http` types in all public APIs. TLS fingerprinting via `utls`, HTTP/2 fingerprinting via custom framer + hpack transport. No forked `net/http` dependencies.
 
-Wrap `*http.Client` for cleaner API. Include cookie jar. Always wrap errors with context.
+### Architecture
 
-### client.go
+- **`client.go`** — `Client` struct, `New(...Option)` constructor, `Do()` with manual redirect handling, cookie capture, transparent decompression, cookie management methods
+- **`option.go`** — Functional options: `WithProxy`, `WithBrowser`, `WithBrowserVersion`, `WithPlatform`, `WithClientHelloID`, `WithH2Profile`, `WithCookieExtractor`, `WithDefaultHeaderOverrides`, `WithDisableKeepAlives`, `WithDisableSessionTickets`, `WithInsecureSkipVerify`, `WithDisableDecompression`
+- **`transport.go`** — `http.RoundTripper` implementation: TLS dial with `utls`, ALPN routing to H1/H2, HTTP CONNECT proxy, SOCKS5 proxy
+- **`h2.go`** — Custom HTTP/2 round trip using `http2.NewFramer()` + `hpack.NewEncoder()` for SETTINGS order/values, WINDOW_UPDATE, pseudo-header order, header order, PRIORITY frames
+- **`h1.go`** — HTTP/1.1 round trip with controlled header ordering via raw writes, `http.ReadResponse()` for parsing
+- **`fingerprint.go`** — Browser profiles (Chrome, Safari, Firefox) as pure data: TLS ClientHelloID, HTTP/2 settings, default headers
+- **`header.go`** — Magic header keys (`HeaderOrderKey`, `PseudoHeaderOrderKey`) for controlling wire order
+- **`cookie.go`** — Custom `ParseSetCookie` with relaxed validation (allows `"` in cookie values), `ParseCookies`, `GetCookieByName`
+- **`jar.go`** — `CookieJar` wrapping stdlib `net/http/cookiejar.Jar`
+- **`decompress.go`** — Transparent response decompression (gzip, deflate, brotli, zstd)
+- **`proxy.go`** — `Proxy` type, `ParseProxy`, `ImportProxies`
 
-```go
-package client
-
-import (
-    "fmt"
-    "github.com/enetx/http"
-    "net/http/cookiejar"
-    "net/url"
-)
-
-type Client struct {
-    inner *http.Client
-    proxy *url.URL
-}
-
-func New(proxy *url.URL) (*Client, error) {
-    client, err := newClient(proxy)
-    if err != nil {
-        return nil, fmt.Errorf("creating http client: %w", err)
-    }
-
-    return &Client{
-        inner: client,
-        proxy: proxy,
-    }, nil
-}
-
-func (c *Client) Do(req *http.Request) (*http.Response, error) {
-    return c.inner.Do(req)
-}
-
-func newClient(proxy *url.URL) (*http.Client, error) {
-    jar, err := cookiejar.New(nil)
-    if err != nil {
-        return nil, fmt.Errorf("creating cookie jar: %w", err)
-    }
-
-    return &http.Client{
-        Transport: &http.Transport{
-            Proxy: http.ProxyURL(proxy),
-        },
-        Jar: jar,
-    }, nil
-}
-```
-
-### proxies.go
+### Creating a Client
 
 ```go
 package client
 
-import (
-    "bufio"
-    "fmt"
-    "net/url"
-    "os"
-    "strings"
+// New creates a Client with functional options. Defaults to Chrome on Windows
+// with keep-alives disabled, session tickets disabled, and TLS verification skipped.
+func New(opts ...Option) (*Client, error)
+
+// Usage
+c, err := client.New(
+    client.WithProxy(proxy),
+    client.WithBrowser(client.BrowserFirefox),
+    client.WithPlatform(client.PlatformMacOS),
 )
-
-func ParseProxy(line string) (*url.URL, error) {
-    parts := strings.Split(line, ":")
-    if len(parts) != 2 && len(parts) != 4 {
-        return nil, fmt.Errorf("invalid proxy: %s", line)
-    }
-
-    proxy := &url.URL{
-        Scheme: "http",
-        Host:   parts[0] + ":" + parts[1],
-    }
-
-    if len(parts) == 4 {
-        proxy.User = url.UserPassword(parts[2], parts[3])
-    }
-
-    return proxy, nil
-}
-
-func ImportProxies(filename string) ([]*url.URL, error) {
-    f, err := os.Open(filename)
-    if err != nil {
-        return nil, fmt.Errorf("opening proxy file: %w", err)
-    }
-    defer f.Close()
-
-    var proxies []*url.URL
-    scanner := bufio.NewScanner(f)
-    for scanner.Scan() {
-        proxy, err := ParseProxy(scanner.Text())
-        if err != nil {
-            return nil, fmt.Errorf("parsing proxy line %q: %w", scanner.Text(), err)
-        }
-        proxies = append(proxies, proxy)
-    }
-
-    if err := scanner.Err(); err != nil {
-        return nil, fmt.Errorf("scanning proxy file: %w", err)
-    }
-
-    return proxies, nil
-}
-```
-
-### cookies.go
-
-```go
-package client
-
-import (
-    "github.com/enetx/http"
-    "net/url"
-)
-
-func (c *Client) SetCookies(u *url.URL, cookies []*http.Cookie) {
-    c.inner.Jar.SetCookies(u, cookies)
-}
 ```
 
 ### Usage Example
@@ -821,8 +731,13 @@ type APIClient struct {
     baseURL string
 }
 
-func New(baseURL string, proxy *url.URL) (*APIClient, error) {
-    c, err := client.New(proxy)
+func New(baseURL string, proxy *client.Proxy) (*APIClient, error) {
+    var opts []client.Option
+    if proxy != nil {
+        opts = append(opts, client.WithProxy(proxy))
+    }
+
+    c, err := client.New(opts...)
     if err != nil {
         return nil, fmt.Errorf("creating http client: %w", err)
     }
@@ -843,6 +758,7 @@ func doRequest[T any](ctx context.Context, c *APIClient, path string) (*T, error
     }
     req.Header.Set("Accept", "application/json")
 
+    // Client handles decompression transparently — no manual decompression needed.
     res, err := c.http.Do(req)
     if err != nil {
         return nil, fmt.Errorf("executing request: %w", err)

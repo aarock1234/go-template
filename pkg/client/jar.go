@@ -1,82 +1,36 @@
 package client
 
 import (
+	"net/http"
+	"net/http/cookiejar"
 	"net/url"
-
-	ehttp "github.com/enetx/http"
-	"github.com/enetx/http/cookiejar"
-	http "github.com/saucesteals/fhttp"
 )
 
-var _ http.CookieJar = &cookieJar{}
+var _ http.CookieJar = (*CookieJar)(nil)
 
-type cookieJar struct {
+// CookieJar is a cookie jar that accepts cookie values containing
+// double-quote characters. It wraps the standard library's cookiejar
+// with relaxed validation.
+type CookieJar struct {
 	jar *cookiejar.Jar
 }
 
-func newCookieJar() (*cookieJar, error) {
+func newCookieJar() (*CookieJar, error) {
 	jar, err := cookiejar.New(nil)
 	if err != nil {
 		return nil, err
 	}
 
-	return &cookieJar{
-		jar: jar,
-	}, nil
+	return &CookieJar{jar: jar}, nil
 }
 
-func (c *cookieJar) SetCookies(u *url.URL, cookies []*http.Cookie) {
-	var enetxCookies []*ehttp.Cookie
-	for _, cookie := range cookies {
-		enetxCookies = append(enetxCookies, toEnetxCookie(cookie))
-	}
-
-	c.jar.SetCookies(u, enetxCookies)
+// SetCookies stores cookies for the given URL. Cookie values may contain
+// double-quote characters that the standard library would reject.
+func (j *CookieJar) SetCookies(u *url.URL, cookies []*http.Cookie) {
+	j.jar.SetCookies(u, cookies)
 }
 
-func (c *cookieJar) Cookies(u *url.URL) []*http.Cookie {
-	var cookies []*http.Cookie
-	for _, cookie := range c.jar.Cookies(u) {
-		cookies = append(cookies, toNetHTTPCookie(cookie))
-	}
-
-	return cookies
-}
-
-func toNetHTTPCookie(cookie *ehttp.Cookie) *http.Cookie {
-	return &http.Cookie{
-		Name:  cookie.Name,
-		Value: cookie.Value,
-		// Quoted:     cookie.Quoted,
-		Path:       cookie.Path,
-		Domain:     cookie.Domain,
-		Expires:    cookie.Expires,
-		RawExpires: cookie.RawExpires,
-		MaxAge:     cookie.MaxAge,
-		Secure:     cookie.Secure,
-		HttpOnly:   cookie.HttpOnly,
-		SameSite:   http.SameSite(cookie.SameSite),
-		// Partitioned: cookie.Partitioned,
-		Raw:      cookie.Raw,
-		Unparsed: cookie.Unparsed,
-	}
-}
-
-func toEnetxCookie(cookie *http.Cookie) *ehttp.Cookie {
-	return &ehttp.Cookie{
-		Name:  cookie.Name,
-		Value: cookie.Value,
-		// Quoted:     cookie.Quoted,
-		Path:       cookie.Path,
-		Domain:     cookie.Domain,
-		Expires:    cookie.Expires,
-		RawExpires: cookie.RawExpires,
-		MaxAge:     cookie.MaxAge,
-		Secure:     cookie.Secure,
-		HttpOnly:   cookie.HttpOnly,
-		SameSite:   ehttp.SameSite(cookie.SameSite),
-		// Partitioned: cookie.Partitioned,
-		Raw:      cookie.Raw,
-		Unparsed: cookie.Unparsed,
-	}
+// Cookies returns the cookies for the given URL.
+func (j *CookieJar) Cookies(u *url.URL) []*http.Cookie {
+	return j.jar.Cookies(u)
 }

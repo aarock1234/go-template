@@ -15,13 +15,18 @@ type Template struct {
 
 // New creates a Template with an HTTP client configured for the given proxy.
 func New(db *db.DB, proxy *client.Proxy) (*Template, error) {
-	client, err := client.New(proxy)
+	var opts []client.Option
+	if proxy != nil {
+		opts = append(opts, client.WithProxy(proxy))
+	}
+
+	c, err := client.New(opts...)
 	if err != nil {
 		return nil, err
 	}
 
 	return &Template{
 		db:     db,
-		client: client,
+		client: c,
 	}, nil
 }

@@ -2,8 +2,7 @@ package template
 
 import (
 	"context"
-
-	"github.com/saucesteals/fhttp"
+	"net/http"
 )
 
 type exampleRequest struct {
@@ -21,7 +20,7 @@ func (t *Template) Example(ctx context.Context) (*exampleResponse, error) {
 	}
 
 	var resp []byte
-	if err := t.doRequest(ctx, http.MethodPost, "/path", payload, &resp); err != nil {
+	if err := t.doRequest(ctx, http.MethodPost, "/api/all", payload, &resp); err != nil {
 		return nil, err
 	}
 
