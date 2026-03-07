@@ -34,7 +34,7 @@ func (b *h2ResponseBody) Close() error {
 	var err error
 	b.once.Do(func() {
 		err = b.ReadCloser.Close()
-		b.conn.Close()
+		_ = b.conn.Close()
 	})
 
 	return err
@@ -105,7 +105,7 @@ func (t *transport) encodeHeaders(req *http.Request) []byte {
 
 	for _, name := range order {
 		if val, ok := pseudoValues[name]; ok {
-			enc.WriteField(hpack.HeaderField{
+			_ = enc.WriteField(hpack.HeaderField{
 				Name:  name,
 				Value: val,
 			})
@@ -121,7 +121,7 @@ func (t *transport) encodeHeaders(req *http.Request) []byte {
 		}
 
 		for _, val := range req.Header.Values(key) {
-			enc.WriteField(hpack.HeaderField{
+			_ = enc.WriteField(hpack.HeaderField{
 				Name:  strings.ToLower(key),
 				Value: val,
 			})
@@ -136,7 +136,7 @@ func (t *transport) encodeHeaders(req *http.Request) []byte {
 		}
 
 		for _, val := range req.Header.Values(key) {
-			enc.WriteField(hpack.HeaderField{
+			_ = enc.WriteField(hpack.HeaderField{
 				Name:  strings.ToLower(key),
 				Value: val,
 			})
@@ -225,7 +225,7 @@ func (t *transport) readH2Response(framer *http2.Framer, conn net.Conn, req *htt
 
 			if f.StreamEnded() {
 				resp.Body = http.NoBody
-				conn.Close()
+				_ = conn.Close()
 
 				return resp, nil
 			}
@@ -263,7 +263,7 @@ func (t *transport) readH2Response(framer *http2.Framer, conn net.Conn, req *htt
 // writer. It sends WINDOW_UPDATE frames for flow control and handles control
 // frames received during body reading.
 func (t *transport) readH2Body(framer *http2.Framer, pw *io.PipeWriter) {
-	defer pw.Close()
+	defer func() { _ = pw.Close() }()
 
 	for {
 		frame, err := framer.ReadFrame()

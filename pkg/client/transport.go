@@ -59,7 +59,7 @@ func (t *transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	case "h2":
 		resp, err := t.roundTripH2(conn, req)
 		if err != nil {
-			conn.Close()
+			_ = conn.Close()
 
 			return nil, err
 		}
@@ -68,7 +68,7 @@ func (t *transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	default:
 		resp, err := t.roundTripH1(conn, req)
 		if err != nil {
-			conn.Close()
+			_ = conn.Close()
 
 			return nil, err
 		}
@@ -103,7 +103,7 @@ func (t *transport) dialTLS(ctx context.Context, addr string) (net.Conn, string,
 	tlsConn := utls.UClient(tcpConn, tlsConfig, t.clientHelloID)
 
 	if err := tlsConn.HandshakeContext(ctx); err != nil {
-		tcpConn.Close()
+		_ = tcpConn.Close()
 
 		return nil, "", fmt.Errorf("tls handshake: %w", err)
 	}
@@ -153,21 +153,21 @@ func (t *transport) dialHTTPProxy(ctx context.Context, targetAddr string) (net.C
 	}
 
 	if err := connectReq.Write(conn); err != nil {
-		conn.Close()
+		_ = conn.Close()
 
 		return nil, fmt.Errorf("writing connect request: %w", err)
 	}
 
 	resp, err := http.ReadResponse(bufio.NewReader(conn), connectReq)
 	if err != nil {
-		conn.Close()
+		_ = conn.Close()
 
 		return nil, fmt.Errorf("reading connect response: %w", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		conn.Close()
+		_ = conn.Close()
 
 		return nil, fmt.Errorf("proxy connect returned status %d", resp.StatusCode)
 	}

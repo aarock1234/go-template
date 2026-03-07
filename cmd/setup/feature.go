@@ -18,6 +18,8 @@ const (
 	tagDocker         tag = "docker"
 	tagPostgres       tag = "postgres"
 	tagPostgresDocker tag = "postgres-docker"
+	tagServer         tag = "server"
+	tagClient         tag = "client"
 	tagSetup          tag = "setup"
 )
 
@@ -38,6 +40,7 @@ const (
 	fileCompose      = "compose.yaml"
 	fileEnvExample   = ".env.example"
 	fileEnvConfig    = "pkg/env/config.go"
+	fileMain         = "cmd/template/main.go"
 )
 
 // section identifies a tagged block inside a file.
@@ -76,7 +79,7 @@ var (
 	}
 
 	postgresRemoval = feature{
-		dirs:    []string{"pkg/db"},
+		dirs:    []string{"pkg/db", "pkg/template"},
 		compose: []string{"postgres"},
 		sections: []section{
 			{
@@ -95,6 +98,10 @@ var (
 				file: fileEnvConfig,
 				tag:  tagPostgres,
 			},
+			{
+				file: fileMain,
+				tag:  tagPostgres,
+			},
 		},
 	}
 
@@ -107,6 +114,38 @@ var (
 			},
 		},
 	}
+
+	serverRemoval = feature{
+		dirs: []string{"pkg/middleware", "pkg/respond", "pkg/apperr", "pkg/handler", "pkg/service"},
+		sections: []section{
+			{
+				file: fileMain,
+				tag:  tagServer,
+			},
+			{
+				file: fileMakefile,
+				tag:  tagServer,
+			},
+			{
+				file: fileEnvExample,
+				tag:  tagServer,
+			},
+			{
+				file: fileEnvConfig,
+				tag:  tagServer,
+			},
+		},
+	}
+
+	clientRemoval = feature{
+		dirs: []string{"pkg/template"},
+		sections: []section{
+			{
+				file: fileMain,
+				tag:  tagClient,
+			},
+		},
+	}
 )
 
 // optionalPackages is the single source of truth for all toggleable packages.
@@ -115,7 +154,7 @@ var optionalPackages = []optionalPkg{
 	{
 		label: "HTTP Client: TLS fingerprint, proxy, cookies, HTTP/2",
 		feature: feature{
-			dirs: []string{"pkg/client"},
+			dirs: []string{"pkg/client", "pkg/template"},
 		},
 	},
 	{
@@ -148,6 +187,12 @@ var optionalPackages = []optionalPkg{
 			dirs: []string{"pkg/fake"},
 		},
 	},
+	{
+		label: "Pointer Helpers: generic address-of utilities",
+		feature: feature{
+			dirs: []string{"pkg/ptr"},
+		},
+	},
 }
 
 // theme returns a minimal monotone theme with checkbox-style indicators.
@@ -157,5 +202,6 @@ func theme() *huh.Theme {
 	t.Focused.UnselectedPrefix = lipgloss.NewStyle().SetString("[ ] ")
 	t.Blurred.SelectedPrefix = t.Focused.SelectedPrefix
 	t.Blurred.UnselectedPrefix = t.Focused.UnselectedPrefix
+
 	return t
 }

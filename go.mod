@@ -6,6 +6,7 @@ require (
 	github.com/andybalholm/brotli v1.2.0
 	github.com/charmbracelet/huh v0.8.0
 	github.com/charmbracelet/lipgloss v1.1.0
+	github.com/go-chi/chi/v5 v5.2.5
 	github.com/jackc/pgx/v5 v5.8.0
 	github.com/klauspost/compress v1.18.4
 	github.com/lmittmann/tint v1.1.3

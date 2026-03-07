@@ -1,7 +1,9 @@
 // Package ptr provides nil-safe pointer dereferencing and comparison utilities.
 package ptr
 
-// Deprecated: To creates a pointer to a value. Use new(expr) instead (Go 1.26+).
+// To creates a pointer to a value.
+//
+// Deprecated: Use new(expr) instead (Go 1.26+).
 func To[T any](v T) *T {
 	return new(v)
 }

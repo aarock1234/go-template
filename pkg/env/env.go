@@ -54,7 +54,7 @@ func load(filename string) error {
 	if err != nil {
 		return fmt.Errorf("open %q: %w", filename, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	vars := make(map[string]string)
 	scanner := bufio.NewScanner(f)

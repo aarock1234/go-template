@@ -9,22 +9,27 @@ type exampleRequest struct {
 	Example string `json:"example"`
 }
 
-type exampleResponse struct {
-	ResponseBytes []byte
+// ExampleResponse holds the parsed TLS fingerprint from tls.peet.ws.
+type ExampleResponse struct {
+	TLS TLSFingerprint `json:"tls"`
 }
 
-// Example demonstrates a POST request with JSON payload and raw byte response.
-func (t *Template) Example(ctx context.Context) (*exampleResponse, error) {
+// TLSFingerprint contains the PeetPrint fingerprint and its hash.
+type TLSFingerprint struct {
+	PeetPrint     string `json:"peetprint"`
+	PeetPrintHash string `json:"peetprint_hash"`
+}
+
+// Example demonstrates a POST request with JSON payload and typed response.
+func (t *Template) Example(ctx context.Context) (*ExampleResponse, error) {
 	payload := exampleRequest{
 		Example: "example",
 	}
 
-	var resp []byte
-	if err := t.doRequest(ctx, http.MethodPost, "/api/all", payload, &resp); err != nil {
+	resp, err := doJSON[ExampleResponse](ctx, t, http.MethodPost, "/api/all", payload)
+	if err != nil {
 		return nil, err
 	}
 
-	return &exampleResponse{
-		ResponseBytes: resp,
-	}, nil
+	return resp, nil
 }

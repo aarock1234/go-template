@@ -101,7 +101,7 @@ func New(opts ...Option) (*Client, error) {
 	c.jar = jar
 	c.http = &http.Client{
 		Transport: t,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
 			return http.ErrUseLastResponse
 		},
 	}
@@ -122,7 +122,7 @@ func (c *Client) Do(req *http.Request) (*http.Response, error) {
 		}
 
 		if err := c.storeResponseCookies(resp); err != nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 
 			return nil, err
 		}
@@ -138,7 +138,7 @@ func (c *Client) Do(req *http.Request) (*http.Response, error) {
 			return resp, nil
 		}
 
-		resp.Body.Close()
+		_ = resp.Body.Close()
 
 		next, err := c.redirectRequest(req, resp, method)
 		if err != nil {
@@ -242,7 +242,7 @@ func (c *Client) redirectRequest(origin *http.Request, resp *http.Response, meth
 	next, err := http.NewRequestWithContext(origin.Context(), method, location.String(), body)
 	if err != nil {
 		if body != nil {
-			body.Close()
+			_ = body.Close()
 		}
 
 		return nil, fmt.Errorf("creating redirect request: %w", err)

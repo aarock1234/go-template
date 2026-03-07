@@ -19,6 +19,10 @@ setup: ## Interactive project setup
 .PHONY: up down watch
 # [/docker]
 
+# [server]
+.PHONY: serve
+# [/server]
+
 .PHONY: generate fix lint format test build dev
 
 # [docker]
@@ -44,14 +48,14 @@ db-down:
 # [postgres]
 # Migrations
 migrate:
-	goose -dir package/db/migrations postgres $(DATABASE_URL) up
+	goose -dir pkg/db/migrations postgres $(DATABASE_URL) up
 
 migrate-down:
-	goose -dir package/db/migrations postgres $(DATABASE_URL) down
+	goose -dir pkg/db/migrations postgres $(DATABASE_URL) down
 
 migrate-new:
 	@read -p "Migration name: " name && \
-	goose -dir package/db/migrations create $$name sql
+	goose -dir pkg/db/migrations create $$name sql
 # [/postgres]
 
 # Go Commands
@@ -62,7 +66,7 @@ fix:
 	go fix ./...
 
 lint:
-	go vet ./...
+	golangci-lint run
 
 format:
 	go fmt ./...
@@ -72,6 +76,11 @@ test:
 
 build:
 	go build -o bin/template ./cmd/template
+
+# [server]
+serve:
+	go run ./cmd/template
+# [/server]
 
 dev:
 	go run ./cmd/template

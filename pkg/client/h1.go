@@ -6,7 +6,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"sync"
 
 	"golang.org/x/sync/errgroup"
 )
@@ -91,7 +90,6 @@ func (t *transport) roundTripH1(conn net.Conn, req *http.Request) (*http.Respons
 type h1ResponseBody struct {
 	io.ReadCloser
 	conn net.Conn
-	once sync.Once
 }
 
 // Close closes the response body and the underlying connection exactly once.

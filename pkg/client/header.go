@@ -13,7 +13,7 @@ const HeaderOrderKey = "Header-Order"
 // PseudoHeaderOrderKey is a magic header key that overrides the browser
 // profile's pseudo-header order for a single request. Values are pseudo-header
 // names such as ":method", ":authority", ":scheme", and ":path".
-const PseudoHeaderOrderKey = "Psuedo-Header-Order"
+const PseudoHeaderOrderKey = "Pseudo-Header-Order"
 
 // isMagicKey reports whether key is a transport-internal ordering directive
 // that must not be written on the wire.

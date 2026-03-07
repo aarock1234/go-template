@@ -119,7 +119,7 @@ func ImportProxies(filename string, scheme ProxyScheme) ([]*Proxy, error) {
 	if err != nil {
 		return nil, fmt.Errorf("opening proxy file: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	var proxies []*Proxy
 	scanner := bufio.NewScanner(f)

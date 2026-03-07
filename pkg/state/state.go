@@ -26,7 +26,7 @@ func Open[T any](path string) (*File[T], error) {
 	}
 
 	if err := lockFile(f); err != nil {
-		f.Close()
+		_ = f.Close()
 		return nil, fmt.Errorf("acquiring state file lock: %w", err)
 	}
 
@@ -82,6 +82,6 @@ func (f *File[T]) Save(v *T) error {
 
 // Close releases the exclusive lock and closes the file.
 func (f *File[T]) Close() error {
-	unlockFile(f.f)
+	_ = unlockFile(f.f)
 	return f.f.Close()
 }

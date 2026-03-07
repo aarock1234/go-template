@@ -19,44 +19,22 @@ var defaultHeaders = http.Header{
 	"Accept-Encoding": {"gzip, deflate, br"},
 }
 
-func (t *Template) doRequest(ctx context.Context, method, path string, payload any, response any) error {
-	return t.doRequestWithHeaders(ctx, method, path, payload, response, http.Header{})
-}
-
-func (t *Template) doRequestWithHeaders(ctx context.Context, method, path string, payload any, response any, headers http.Header) error {
-	var (
-		body        io.Reader
-		contentType string
-	)
-
-	switch p := payload.(type) {
-	case url.Values:
-		body = bytes.NewReader([]byte(p.Encode()))
-		contentType = "application/x-www-form-urlencoded"
-	case nil:
-		// no body
-	default:
-		data, err := json.Marshal(p)
-		if err != nil {
-			return fmt.Errorf("marshaling request: %w", err)
-		}
-		body = bytes.NewReader(data)
-		contentType = "application/json"
-	}
-
+// do executes an HTTP request and returns the response. The caller is
+// responsible for closing the response body.
+func (t *Template) do(ctx context.Context, method, path string, body io.Reader, contentType string, headers http.Header) (*http.Response, error) {
 	fullURL := baseURL + path
 	if _, err := url.Parse(fullURL); err != nil {
-		return fmt.Errorf("invalid url %q: %w", fullURL, err)
+		return nil, fmt.Errorf("invalid url %q: %w", fullURL, err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, method, fullURL, body)
 	if err != nil {
-		return fmt.Errorf("creating request: %w", err)
+		return nil, fmt.Errorf("creating request: %w", err)
 	}
 	req.Header = defaultHeaders.Clone()
 
 	if contentType != "" {
-		req.Header.Set("content-type", contentType)
+		req.Header.Set("Content-Type", contentType)
 	}
 
 	for k, v := range headers {
@@ -65,44 +43,52 @@ func (t *Template) doRequestWithHeaders(ctx context.Context, method, path string
 
 	resp, err := t.client.Do(req)
 	if err != nil {
-		return fmt.Errorf("executing request: %w", err)
+		return nil, fmt.Errorf("executing request: %w", err)
 	}
-	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("unexpected status: %d", resp.StatusCode)
+		_ = resp.Body.Close()
+
+		return nil, fmt.Errorf("unexpected status: %d", resp.StatusCode)
 	}
 
-	if response != nil {
-		if err := decodeResponse(resp.Body, response); err != nil {
-			return fmt.Errorf("decoding response: %w", err)
-		}
-	}
-
-	return nil
+	return resp, nil
 }
 
-func decodeResponse(body io.Reader, response any) error {
-	switch v := response.(type) {
-	case *string:
-		data, err := io.ReadAll(body)
-		if err != nil {
-			return fmt.Errorf("reading string: %w", err)
-		}
-		*v = string(data)
-
-	case *[]byte:
-		data, err := io.ReadAll(body)
-		if err != nil {
-			return fmt.Errorf("reading bytes: %w", err)
-		}
-		*v = data
-
-	default:
-		if err := json.NewDecoder(body).Decode(response); err != nil {
-			return fmt.Errorf("decoding json: %w", err)
-		}
+// doJSON sends an HTTP request with an optional JSON payload and decodes
+// the JSON response into T. doJSON is a top-level function because Go
+// does not support generic methods.
+func doJSON[T any](ctx context.Context, t *Template, method, path string, payload any) (*T, error) {
+	body, contentType, err := marshalPayload(payload)
+	if err != nil {
+		return nil, err
 	}
 
-	return nil
+	resp, err := t.do(ctx, method, path, body, contentType, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	var result T
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decoding response: %w", err)
+	}
+
+	return &result, nil
+}
+
+// marshalPayload encodes a payload as JSON and returns a reader and
+// content type. A nil payload produces a nil reader and empty content type.
+func marshalPayload(payload any) (io.Reader, string, error) {
+	if payload == nil {
+		return nil, "", nil
+	}
+
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return nil, "", fmt.Errorf("marshaling request: %w", err)
+	}
+
+	return bytes.NewReader(data), "application/json", nil
 }

@@ -119,6 +119,30 @@ if err != nil {
 }
 ```
 
+### Deferred Close Errors
+
+For read-only resources (response bodies, read-only files, network connections), close errors are almost never actionable. Explicitly discard them with `_ =` to satisfy `errcheck` and signal intent:
+
+```go
+// GOOD: explicit discard for read-only cleanup
+defer func() { _ = resp.Body.Close() }()
+defer func() { _ = f.Close() }()
+
+// BAD: unchecked — errcheck will flag this
+defer resp.Body.Close()
+```
+
+For **writable** resources where close can indicate data loss (buffered file writes, database transactions), check the error:
+
+```go
+// Writable file: close error means data may not have flushed
+defer func() {
+    if err := f.Close(); err != nil {
+        slog.Error("closing output file", "error", err)
+    }
+}()
+```
+
 ### Sentinel Errors
 
 For expected error conditions. Check with `errors.Is`.
@@ -688,42 +712,169 @@ func (c *Cycle[T]) Next() (T, bool) {
 
 ## HTTP Client Pattern
 
-Structure: `pkg/client/` with files: `client.go`, `option.go`, `transport.go`, `h1.go`, `h2.go`, `fingerprint.go`, `header.go`, `cookie.go`, `jar.go`, `decompress.go`, `proxy.go`.
+Structure: `pkg/client/{client.go, option.go, proxy.go, cookie.go, ...}`
 
-Uses standard `net/http` types in all public APIs. TLS fingerprinting via `utls`, HTTP/2 fingerprinting via custom framer + hpack transport. No forked `net/http` dependencies.
+Uses standard `net/http` with `github.com/refraction-networking/utls` for TLS fingerprinting. The client wraps `*http.Client` with functional options, typed proxy config, custom cookie handling, and manual redirect following.
 
-### Architecture
+### client.go
 
-- **`client.go`** — `Client` struct, `New(...Option)` constructor, `Do()` with manual redirect handling, cookie capture, transparent decompression, cookie management methods
-- **`option.go`** — Functional options: `WithProxy`, `WithBrowser`, `WithBrowserVersion`, `WithPlatform`, `WithClientHelloID`, `WithH2Profile`, `WithCookieExtractor`, `WithDefaultHeaderOverrides`, `WithDisableKeepAlives`, `WithDisableSessionTickets`, `WithInsecureSkipVerify`, `WithDisableDecompression`
-- **`transport.go`** — `http.RoundTripper` implementation: TLS dial with `utls`, ALPN routing to H1/H2, HTTP CONNECT proxy, SOCKS5 proxy
-- **`h2.go`** — Custom HTTP/2 round trip using `http2.NewFramer()` + `hpack.NewEncoder()` for SETTINGS order/values, WINDOW_UPDATE, pseudo-header order, header order, PRIORITY frames
-- **`h1.go`** — HTTP/1.1 round trip with controlled header ordering via raw writes, `http.ReadResponse()` for parsing
-- **`fingerprint.go`** — Browser profiles (Chrome, Safari, Firefox) as pure data: TLS ClientHelloID, HTTP/2 settings, default headers
-- **`header.go`** — Magic header keys (`HeaderOrderKey`, `PseudoHeaderOrderKey`) for controlling wire order
-- **`cookie.go`** — Custom `ParseSetCookie` with relaxed validation (allows `"` in cookie values), `ParseCookies`, `GetCookieByName`
-- **`jar.go`** — `CookieJar` wrapping stdlib `net/http/cookiejar.Jar`
-- **`decompress.go`** — Transparent response decompression (gzip, deflate, brotli, zstd)
-- **`proxy.go`** — `Proxy` type, `ParseProxy`, `ImportProxies`
-
-### Creating a Client
+Functional options configure the client. Sensible defaults mean callers only override what they need.
 
 ```go
 package client
 
-// New creates a Client with functional options. Defaults to Chrome on Windows
-// with keep-alives disabled, session tickets disabled, and TLS verification skipped.
-func New(opts ...Option) (*Client, error)
+// Client is an HTTP client with TLS fingerprinting, cookie handling,
+// and proxy support.
+type Client struct {
+    http      *http.Client
+    jar       *CookieJar
+    proxy     *Proxy
+    browser   Browser
+    platform  Platform
+    // ...
+}
 
-// Usage
-c, err := client.New(
-    client.WithProxy(proxy),
-    client.WithBrowser(client.BrowserFirefox),
-    client.WithPlatform(client.PlatformMacOS),
-)
+// New creates a new Client with the given options.
+func New(opts ...Option) (*Client, error) {
+    c := &Client{
+        browser:  BrowserChrome,
+        platform: PlatformWindows,
+        // sensible defaults...
+    }
+
+    for _, opt := range opts {
+        opt(c)
+    }
+
+    // resolve TLS/HTTP2 profile from browser+platform, build transport...
+
+    return c, nil
+}
+
+// Do sends an HTTP request. Redirects are followed manually so that
+// Set-Cookie headers from intermediate responses are captured.
+func (c *Client) Do(req *http.Request) (*http.Response, error) {
+    // manual redirect loop with cookie capture
+}
+```
+
+### option.go
+
+One option per concern. Each returns an `Option` closure.
+
+```go
+package client
+
+// Option configures a Client.
+type Option func(*Client)
+
+func WithProxy(p *Proxy) Option {
+    return func(c *Client) { c.proxy = p }
+}
+
+func WithBrowser(b Browser) Option {
+    return func(c *Client) { c.browser = b }
+}
+
+func WithPlatform(p Platform) Option {
+    return func(c *Client) { c.platform = p }
+}
+
+func WithCookieExtractor(fn CookieExtractor) Option {
+    return func(c *Client) { c.extractCookies = fn }
+}
+
+func WithDefaultHeaderOverrides(h http.Header) Option {
+    return func(c *Client) { c.defaultHeaderOverrides = h.Clone() }
+}
+```
+
+### proxy.go
+
+Typed `Proxy` struct instead of raw `*url.URL`. Keeps host, port, credentials, and scheme separate for cleaner access and conversion.
+
+```go
+package client
+
+// Proxy holds a parsed proxy configuration.
+type Proxy struct {
+    Scheme   ProxyScheme
+    Host     string
+    Port     string
+    Username string
+    Password string
+}
+
+// URL returns the proxy as a *url.URL suitable for http.Transport.Proxy.
+func (p *Proxy) URL() *url.URL {
+    u := &url.URL{
+        Scheme: string(p.Scheme),
+        Host:   p.Host + ":" + p.Port,
+    }
+
+    if p.Username != "" && p.Password != "" {
+        u.User = url.UserPassword(p.Username, p.Password)
+    }
+
+    return u
+}
+
+// ParseProxy parses a "host:port" or "host:port:user:pass" string.
+// An empty string returns (nil, nil).
+func ParseProxy(proxy string, scheme ProxyScheme) (*Proxy, error) {
+    proxy = strings.TrimSpace(proxy)
+    if proxy == "" {
+        return nil, nil
+    }
+
+    split := strings.Split(proxy, ":")
+    if len(split) != 2 && len(split) != 4 {
+        return nil, fmt.Errorf("got %d proxy parts, want 2 or 4: %v", len(split), split)
+    }
+
+    return &Proxy{
+        Scheme: scheme,
+        Host:   split[0],
+        Port:   split[1],
+        // username/password from split[2:4] if present
+    }, nil
+}
+
+// ImportProxies reads proxy configs from a file, one per line.
+func ImportProxies(filename string, scheme ProxyScheme) ([]*Proxy, error) {
+    f, err := os.Open(filename)
+    if err != nil {
+        return nil, fmt.Errorf("opening proxy file: %w", err)
+    }
+    defer func() { _ = f.Close() }()
+
+    var proxies []*Proxy
+    scanner := bufio.NewScanner(f)
+    for scanner.Scan() {
+        line := strings.TrimSpace(scanner.Text())
+        if line == "" {
+            continue
+        }
+
+        proxy, err := ParseProxy(line, scheme)
+        if err != nil {
+            return nil, fmt.Errorf("parsing proxy line %q: %w", line, err)
+        }
+
+        proxies = append(proxies, proxy)
+    }
+
+    if err := scanner.Err(); err != nil {
+        return nil, fmt.Errorf("scanning proxy file: %w", err)
+    }
+
+    return proxies, nil
+}
 ```
 
 ### Usage Example
+
+Downstream packages compose the client with the options they need:
 
 ```go
 type APIClient struct {
@@ -731,20 +882,34 @@ type APIClient struct {
     baseURL string
 }
 
-func New(baseURL string, proxy *client.Proxy) (*APIClient, error) {
-    var opts []client.Option
-    if proxy != nil {
-        opts = append(opts, client.WithProxy(proxy))
+func New(cfg *Config) (*APIClient, error) {
+    var proxy client.Proxy
+    if cfg.Proxy != "" {
+        parsed, err := client.ParseProxy(cfg.Proxy, client.ProxySchemeHTTP)
+        if err != nil {
+            return nil, fmt.Errorf("parsing proxy: %w", err)
+        }
+
+        proxy = *parsed
     }
 
-    c, err := client.New(opts...)
+    opts := []client.Option{
+        client.WithPlatform(client.PlatformWindows),
+        client.WithCookieExtractor(customExtractor),
+    }
+
+    if cfg.Proxy != "" {
+        opts = append(opts, client.WithProxy(&proxy))
+    }
+
+    httpClient, err := client.New(opts...)
     if err != nil {
         return nil, fmt.Errorf("creating http client: %w", err)
     }
 
     return &APIClient{
-        http:    c,
-        baseURL: baseURL,
+        http:    httpClient,
+        baseURL: cfg.BaseURL,
     }, nil
 }
 
@@ -758,12 +923,11 @@ func doRequest[T any](ctx context.Context, c *APIClient, path string) (*T, error
     }
     req.Header.Set("Accept", "application/json")
 
-    // Client handles decompression transparently — no manual decompression needed.
     res, err := c.http.Do(req)
     if err != nil {
         return nil, fmt.Errorf("executing request: %w", err)
     }
-    defer res.Body.Close()
+    defer func() { _ = res.Body.Close() }()
 
     if res.StatusCode != http.StatusOK {
         return nil, fmt.Errorf("unexpected status: %d", res.StatusCode)
@@ -888,18 +1052,24 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 
 ### Dependency Wiring
 
-Prefer manual wiring. Keep it explicit in `main.go`.
+Prefer manual wiring. Keep it explicit in `main.go`. Extract the body into a `run()` function that returns an error so that `defer` statements execute on all exit paths. Reserve `os.Exit` for the top-level `main()`.
 
 ```go
 func main() {
+    if err := run(); err != nil {
+        slog.Error("fatal error", "error", err)
+        os.Exit(1)
+    }
+}
+
+func run() error {
     logger := slog.Default()
 
     db, err := sql.Open("postgres", os.Getenv("DATABASE_URL"))
     if err != nil {
-        logger.Error("failed to open database", "error", err)
-        os.Exit(1)
+        return fmt.Errorf("open database: %w", err)
     }
-    defer db.Close()
+    defer func() { _ = db.Close() }()
 
     repo := repository.New(db, logger)
     service := service.New(repo, logger)
@@ -918,8 +1088,10 @@ func main() {
 
     logger.Info("server starting", "port", "8080")
     if err := server.ListenAndServe(); err != nil {
-        logger.Error("server error", "error", err)
+        return fmt.Errorf("server: %w", err)
     }
+
+    return nil
 }
 ```
 
@@ -1233,7 +1405,7 @@ func main() {
     }
 
     go func() {
-        if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+        if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
             slog.ErrorContext(ctx, "server error", "error", err)
         }
     }()

@@ -4,6 +4,8 @@ package worker
 
 import (
 	"context"
+	"iter"
+	"sync"
 
 	"golang.org/x/sync/errgroup"
 )
@@ -40,6 +42,57 @@ func Map[T, R any](ctx context.Context, items []T, concurrency int, fn func(ctx 
 				return err
 			}
 			results[i] = r
+
+			return nil
+		})
+	}
+
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+
+	return results, nil
+}
+
+// RunIter processes items from an iterator concurrently with at most
+// concurrency goroutines. It returns the first error encountered,
+// cancelling remaining work.
+func RunIter[T any](ctx context.Context, seq iter.Seq[T], concurrency int, fn func(ctx context.Context, item T) error) error {
+	g, ctx := errgroup.WithContext(ctx)
+	g.SetLimit(concurrency)
+
+	for item := range seq {
+		g.Go(func() error {
+			return fn(ctx, item)
+		})
+	}
+
+	return g.Wait()
+}
+
+// MapIter processes items from an iterator concurrently with at most
+// concurrency goroutines and collects results. Unlike Map, input order
+// is not guaranteed because iterator length is unknown upfront.
+func MapIter[T, R any](ctx context.Context, seq iter.Seq[T], concurrency int, fn func(ctx context.Context, item T) (R, error)) ([]R, error) {
+	g, ctx := errgroup.WithContext(ctx)
+	g.SetLimit(concurrency)
+
+	var (
+		mu      sync.Mutex
+		results []R
+	)
+
+	for item := range seq {
+		g.Go(func() error {
+			r, err := fn(ctx, item)
+			if err != nil {
+				return err
+			}
+
+			mu.Lock()
+			results = append(results, r)
+			mu.Unlock()
+
 			return nil
 		})
 	}

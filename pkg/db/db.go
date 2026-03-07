@@ -42,6 +42,11 @@ func (d *DB) Close() {
 	d.pool.Close()
 }
 
+// Ping verifies connectivity to the database.
+func (d *DB) Ping(ctx context.Context) error {
+	return d.pool.Ping(ctx)
+}
+
 // AcquireConn returns a dedicated connection from the pool. The caller
 // must call Release on the returned *pgxpool.Conn when done. This is
 // useful for session-level operations like advisory locks.

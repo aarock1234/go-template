@@ -1,3 +1,4 @@
+// Package fake provides random data generation for testing and development.
 package fake
 
 import (
@@ -53,8 +54,8 @@ func (g *Generator) randomFrom(slice []string) string {
 	return slice[rand.IntN(len(slice))]
 }
 
-func (g *Generator) randomInt(min, max int) int {
+func (g *Generator) randomInt(lo, hi int) int {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	return min + rand.IntN(max-min)
+	return lo + rand.IntN(hi-lo)
 }

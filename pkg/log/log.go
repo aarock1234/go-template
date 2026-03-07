@@ -15,11 +15,27 @@ import (
 
 type contextKey int
 
-const idempotencyKey contextKey = iota
+const (
+	idempotencyKey contextKey = iota
+	requestIDKey
+)
 
 // WithIdempotencyKey returns a copy of ctx carrying the given idempotency key.
 func WithIdempotencyKey(ctx context.Context, key string) context.Context {
 	return context.WithValue(ctx, idempotencyKey, key)
+}
+
+// WithRequestID returns a copy of ctx carrying the given request ID.
+func WithRequestID(ctx context.Context, id string) context.Context {
+	return context.WithValue(ctx, requestIDKey, id)
+}
+
+// RequestIDFromContext extracts the request ID from ctx, or returns an
+// empty string if none is set.
+func RequestIDFromContext(ctx context.Context) string {
+	id, _ := ctx.Value(requestIDKey).(string)
+
+	return id
 }
 
 // ContextHandler wraps an slog.Handler to inject request-scoped values
@@ -32,6 +48,10 @@ type ContextHandler struct {
 func (h *ContextHandler) Handle(ctx context.Context, r slog.Record) error {
 	if key, ok := ctx.Value(idempotencyKey).(string); ok {
 		r.AddAttrs(slog.String("idempotency_key", key))
+	}
+
+	if id, ok := ctx.Value(requestIDKey).(string); ok {
+		r.AddAttrs(slog.String("request_id", id))
 	}
 
 	return h.Handler.Handle(ctx, r)

@@ -16,17 +16,10 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Format
-        run: |
-          unformatted=$(gofmt -l .)
-          if [ -n "$unformatted" ]; then
-            echo "unformatted files:"
-            echo "$unformatted"
-            exit 1
-          fi
-
-      - name: Vet
-        run: make lint
+      - name: Lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.11.1
 
       - name: Build
         run: make build

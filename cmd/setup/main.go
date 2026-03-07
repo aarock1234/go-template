@@ -17,6 +17,8 @@ import (
 
 // setup holds the user's configuration choices collected from the form.
 type setup struct {
+	server    bool
+	client    bool
 	docker    bool
 	postgres  bool
 	pgHosting hosting
@@ -26,12 +28,34 @@ type setup struct {
 
 func main() {
 	s := setup{
+		server:   true,
+		client:   true,
 		docker:   true,
 		postgres: true,
 		confirm:  true,
 	}
 
 	err := huh.NewForm(
+		huh.NewGroup(
+			huh.NewSelect[bool]().
+				Title("Include HTTP Server?").
+				Description("Chi router, middleware, graceful shutdown, JSON handlers").
+				Options(
+					huh.NewOption("Yes", true).Selected(true),
+					huh.NewOption("No", false),
+				).
+				Value(&s.server),
+
+			huh.NewSelect[bool]().
+				Title("Include HTTP Client?").
+				Description("TLS fingerprint, proxy rotation, HTTP/2, scraper entry point").
+				Options(
+					huh.NewOption("Yes", true).Selected(true),
+					huh.NewOption("No", false),
+				).
+				Value(&s.client),
+		),
+
 		huh.NewGroup(
 			huh.NewSelect[bool]().
 				Title("Include Docker?").
@@ -112,6 +136,14 @@ func packageSelect(value *[]int) *huh.MultiSelect[int] {
 
 // apply removes disabled features and cleans up the project.
 func apply(s setup) {
+	if !s.server {
+		warn(removeFeature(serverRemoval))
+	}
+
+	if !s.client {
+		warn(removeFeature(clientRemoval))
+	}
+
 	if !s.docker {
 		warn(removeFeature(dockerRemoval))
 	}
