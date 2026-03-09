@@ -11,8 +11,8 @@ import (
 
 var durationType = reflect.TypeFor[time.Duration]()
 
-// Config holds all environment variables required by the application.
-// Add a field with an `env` tag to register a new variable.
+// New loads the .env file and returns a T populated from the environment.
+// T must be a struct with at least one field tagged `env:"VAR_NAME"`.
 //
 // Tag format:
 //
@@ -21,25 +21,12 @@ var durationType = reflect.TypeFor[time.Duration]()
 //	`env:"VAR_NAME,default=value"`  — uses value when unset
 //
 // Supported field types: string, int, int64, bool, time.Duration.
-type Config struct {
-	// [postgres]
-	DatabaseURL string `env:"DATABASE_URL,required"`
-	// [/postgres]
-	// [server]
-	Port         string        `env:"PORT,default=8080"`
-	ReadTimeout  time.Duration `env:"READ_TIMEOUT,default=10s"`
-	WriteTimeout time.Duration `env:"WRITE_TIMEOUT,default=10s"`
-	// [/server]
-}
-
-// New loads the .env file and returns a Config populated from the environment.
-// Required variables that are missing or empty are returned as a single error.
-func New() (*Config, error) {
-	if err := Load(); err != nil {
+func New[T any](path ...string) (*T, error) {
+	if err := Load(path...); err != nil {
 		return nil, fmt.Errorf("env: load: %w", err)
 	}
 
-	var config Config
+	var config T
 	if err := populate(&config); err != nil {
 		return nil, err
 	}
@@ -47,16 +34,32 @@ func New() (*Config, error) {
 	return &config, nil
 }
 
-// populate reads environment variables into config using its struct tags.
-func populate(config *Config) error {
-	v := reflect.ValueOf(config).Elem()
+// populate reads environment variables into a struct using its field tags.
+// It returns an error if config is not a pointer to a struct or has no
+// fields with env tags.
+func populate(config any) error {
+	v := reflect.ValueOf(config)
+	if v.Kind() != reflect.Pointer || v.Elem().Kind() != reflect.Struct {
+		return fmt.Errorf("env: expected pointer to struct, got %T", config)
+	}
+
+	v = v.Elem()
 	t := v.Type()
 
+	hasTag := false
+	for field := range t.Fields() {
+		if field.Tag.Get("env") != "" {
+			hasTag = true
+			break
+		}
+	}
+
+	if !hasTag {
+		return fmt.Errorf("env: %s has no fields with env tags", t.Name())
+	}
+
 	var missing []string
-
-	for i := range t.NumField() {
-		field := t.Field(i)
-
+	for field := range t.Fields() {
 		tag := field.Tag.Get("env")
 		if tag == "" {
 			continue
@@ -84,7 +87,7 @@ func populate(config *Config) error {
 			continue
 		}
 
-		if err := setField(v.Field(i), val); err != nil {
+		if err := setField(v.FieldByIndex(field.Index), val); err != nil {
 			return fmt.Errorf("env: set %s: %w", name, err)
 		}
 	}

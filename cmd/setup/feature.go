@@ -39,7 +39,6 @@ const (
 	fileDockerignore = ".dockerignore"
 	fileCompose      = "compose.yaml"
 	fileEnvExample   = ".env.example"
-	fileEnvConfig    = "pkg/env/config.go"
 	fileMain         = "cmd/template/main.go"
 )
 
@@ -95,10 +94,6 @@ var (
 				tag:  tagPostgres,
 			},
 			{
-				file: fileEnvConfig,
-				tag:  tagPostgres,
-			},
-			{
 				file: fileMain,
 				tag:  tagPostgres,
 			},
@@ -128,10 +123,6 @@ var (
 			},
 			{
 				file: fileEnvExample,
-				tag:  tagServer,
-			},
-			{
-				file: fileEnvConfig,
 				tag:  tagServer,
 			},
 		},

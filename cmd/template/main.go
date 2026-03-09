@@ -24,6 +24,18 @@ import (
 	_ "github.com/aarock1234/go-template/pkg/log" // structured logger init
 )
 
+// Config holds environment variables for this process.
+type Config struct {
+	// [postgres]
+	DatabaseURL string `env:"DATABASE_URL,required"`
+	// [/postgres]
+	// [server]
+	Port         string        `env:"PORT,default=8080"`
+	ReadTimeout  time.Duration `env:"READ_TIMEOUT,default=10s"`
+	WriteTimeout time.Duration `env:"WRITE_TIMEOUT,default=10s"`
+	// [/server]
+}
+
 func main() {
 	if err := run(); err != nil {
 		slog.Error("fatal error", slog.Any("error", err))
@@ -35,7 +47,7 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	config, err := env.New()
+	config, err := env.New[Config]()
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
 	}
@@ -69,7 +81,7 @@ func run() error {
 // [server]
 
 // serve starts the HTTP server with graceful shutdown.
-func serve(ctx context.Context, config *env.Config) error {
+func serve(ctx context.Context, config *Config) error {
 	// [postgres]
 	database, err := db.New(ctx, config.DatabaseURL)
 	if err != nil {
@@ -130,7 +142,7 @@ func serve(ctx context.Context, config *env.Config) error {
 // [client]
 
 // scrape runs the client-side scraper logic.
-func scrape(ctx context.Context, config *env.Config) error {
+func scrape(ctx context.Context, config *Config) error {
 	slog.InfoContext(ctx, "template application started")
 
 	// [postgres]
