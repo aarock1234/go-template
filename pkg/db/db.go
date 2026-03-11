@@ -1,7 +1,7 @@
 // Package db wraps pgxpool with sqlc-generated queries, transaction helpers,
 // and advisory lock support.
 //
-//go:generate sqlc generate -f sqlc.yaml
+//go:generate go run github.com/sqlc-dev/sqlc/cmd/sqlc@latest generate -f sqlc.yaml
 package db
 
 import (

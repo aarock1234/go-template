@@ -3,14 +3,15 @@
 package client
 
 import (
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
-	"net/http"
 	"net/url"
 	"strings"
 
+	http "github.com/aarock1234/fphttp"
 	utls "github.com/refraction-networking/utls"
 )
 
@@ -31,76 +32,56 @@ type Client struct {
 	browserVersion         string
 	platform               Platform
 	clientHelloID          *utls.ClientHelloID
-	h2Profile              *H2Profile
 	defaultHeaderOverrides http.Header
-	disableKeepAlives      bool
-	disableSessionTickets  bool
-	insecureSkipVerify     bool
 	disableDecompression   bool
+	defaultHeaders         http.Header
 }
 
 // New creates a new Client with the given options. Defaults to Chrome on
-// Windows with keep-alives disabled, session tickets disabled, and TLS
-// verification skipped.
+// Windows with TLS verification skipped.
 func New(opts ...Option) (*Client, error) {
 	c := &Client{
-		browser:               BrowserChrome,
-		browserVersion:        defaultBrowserVersion,
-		platform:              PlatformWindows,
-		extractCookies:        DefaultCookieExtractor,
-		disableKeepAlives:     true,
-		disableSessionTickets: true,
-		insecureSkipVerify:    true,
+		browser:        BrowserChrome,
+		browserVersion: defaultBrowserVersion,
+		platform:       PlatformWindows,
+		extractCookies: DefaultCookieExtractor,
 	}
 
 	for _, opt := range opts {
 		opt(c)
 	}
 
-	profile := resolveProfile(c.browser, c.browserVersion, c.platform)
+	fp := resolveFingerprint(c.browser, c.platform)
 
 	if c.clientHelloID != nil {
-		profile.ClientHelloID = *c.clientHelloID
+		fp.ClientHelloID = *c.clientHelloID
 	}
 
-	if c.h2Profile != nil {
-		profile.H2 = *c.h2Profile
-	}
+	c.defaultHeaders = resolveDefaultHeaders(c.browser, c.browserVersion, c.platform)
 
 	if c.defaultHeaderOverrides != nil {
 		for key, values := range c.defaultHeaderOverrides {
-			profile.DefaultHeaders.Del(key)
+			c.defaultHeaders.Del(key)
 			if len(values) == 0 || values[0] == "" {
 				continue
 			}
 
-			profile.DefaultHeaders.Set(key, values[0])
+			c.defaultHeaders.Set(key, values[0])
 		}
 	}
 
-	var proxyURL *url.URL
+	transport := &http.Transport{
+		Fingerprint:     fp,
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	}
+
 	if c.proxy != nil {
-		proxyURL = c.proxy.URL()
+		transport.Proxy = http.ProxyURL(c.proxy.URL())
 	}
 
-	t := &transport{
-		clientHelloID:         profile.ClientHelloID,
-		h2Profile:             &profile.H2,
-		defaultHeaders:        profile.DefaultHeaders,
-		proxyURL:              proxyURL,
-		disableKeepAlives:     c.disableKeepAlives,
-		insecureSkipVerify:    c.insecureSkipVerify,
-		disableSessionTickets: c.disableSessionTickets,
-	}
-
-	jar, err := newCookieJar()
-	if err != nil {
-		return nil, fmt.Errorf("creating cookie jar: %w", err)
-	}
-
-	c.jar = jar
+	c.jar = newCookieJar()
 	c.http = &http.Client{
-		Transport: t,
+		Transport: transport,
 		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
 			return http.ErrUseLastResponse
 		},
@@ -114,6 +95,7 @@ func New(opts ...Option) (*Client, error) {
 // are captured and applied to subsequent requests.
 func (c *Client) Do(req *http.Request) (*http.Response, error) {
 	for range maxRedirects {
+		c.applyDefaultHeaders(req)
 		c.setRequestCookies(req)
 
 		resp, err := c.doRoundTrip(req)
@@ -133,14 +115,14 @@ func (c *Client) Do(req *http.Request) (*http.Response, error) {
 			}
 		}
 
-		method, ok := c.shouldRedirect(resp)
+		method, ok := shouldRedirect(resp)
 		if !ok {
 			return resp, nil
 		}
 
 		_ = resp.Body.Close()
 
-		next, err := c.redirectRequest(req, resp, method)
+		next, err := redirectRequest(req, resp, method)
 		if err != nil {
 			return nil, err
 		}
@@ -163,6 +145,16 @@ func (c *Client) doRoundTrip(req *http.Request) (*http.Response, error) {
 	)
 
 	return resp, nil
+}
+
+func (c *Client) applyDefaultHeaders(req *http.Request) {
+	for key, values := range c.defaultHeaders {
+		if req.Header.Get(key) == "" {
+			for _, v := range values {
+				req.Header.Set(key, v)
+			}
+		}
+	}
 }
 
 func (c *Client) setRequestCookies(req *http.Request) {
@@ -205,7 +197,7 @@ func (c *Client) storeResponseCookies(resp *http.Response) error {
 
 // shouldRedirect returns (method, true) if the response is a redirect that
 // should be followed, or ("", false) otherwise.
-func (c *Client) shouldRedirect(resp *http.Response) (method string, ok bool) {
+func shouldRedirect(resp *http.Response) (method string, ok bool) {
 	switch resp.StatusCode {
 	case http.StatusMovedPermanently, http.StatusFound, http.StatusSeeOther:
 		return http.MethodGet, true
@@ -216,7 +208,7 @@ func (c *Client) shouldRedirect(resp *http.Response) (method string, ok bool) {
 	}
 }
 
-func (c *Client) redirectRequest(origin *http.Request, resp *http.Response, method string) (*http.Request, error) {
+func redirectRequest(origin *http.Request, resp *http.Response, method string) (*http.Request, error) {
 	location, err := resp.Location()
 	if err != nil {
 		return nil, fmt.Errorf("getting redirect location: %w", err)
@@ -351,36 +343,26 @@ func (c *Client) GetCookieString(domain string) string {
 }
 
 // ClearCookies clears all cookies by creating a new jar.
-func (c *Client) ClearCookies() error {
-	jar, err := newCookieJar()
-	if err != nil {
-		return fmt.Errorf("creating cookie jar: %w", err)
-	}
-
-	c.jar = jar
-
-	return nil
+func (c *Client) ClearCookies() {
+	c.jar = newCookieJar()
 }
 
-// UserAgent returns the default User-Agent header from the transport.
+// UserAgent returns the default User-Agent header.
 func (c *Client) UserAgent() string {
-	if t, ok := c.http.Transport.(*transport); ok {
-		return t.defaultHeaders.Get("user-agent")
-	}
-
-	return ""
+	return c.defaultHeaders.Get("user-agent")
 }
 
-// ClientHint returns the default sec-ch-ua header from the transport.
+// ClientHint returns the default sec-ch-ua header.
 func (c *Client) ClientHint() string {
-	if t, ok := c.http.Transport.(*transport); ok {
-		return t.defaultHeaders.Get("sec-ch-ua")
-	}
-
-	return ""
+	return c.defaultHeaders.Get("sec-ch-ua")
 }
 
 // Proxy returns the proxy configuration used by this client.
 func (c *Client) Proxy() *Proxy {
 	return c.proxy
+}
+
+// Close closes idle connections. Safe to call multiple times.
+func (c *Client) Close() {
+	c.http.CloseIdleConnections()
 }

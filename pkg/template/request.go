@@ -6,9 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/http"
 	"net/url"
 	"strings"
+
+	http "github.com/aarock1234/fphttp"
 )
 
 const baseURL = "https://tls.peet.ws"

@@ -714,7 +714,7 @@ func (c *Cycle[T]) Next() (T, bool) {
 
 Structure: `pkg/client/{client.go, option.go, proxy.go, cookie.go, ...}`
 
-Uses standard `net/http` with `github.com/refraction-networking/utls` for TLS fingerprinting. The client wraps `*http.Client` with functional options, typed proxy config, custom cookie handling, and manual redirect following.
+Uses [`fphttp`](https://github.com/aarock1234/fphttp), a fork of `net/http` with TLS fingerprinting, HTTP/1.1 header ordering, and HTTP/2 connection fingerprinting built in. The client wraps `*fphttp.Client` with functional options, typed proxy config, custom cookie handling, and manual redirect following. Import fphttp as `http` throughout: `import http "github.com/aarock1234/fphttp"`.
 
 ### client.go
 
@@ -746,7 +746,7 @@ func New(opts ...Option) (*Client, error) {
         opt(c)
     }
 
-    // resolve TLS/HTTP2 profile from browser+platform, build transport...
+    // resolve fphttp fingerprint from browser+platform, build transport...
 
     return c, nil
 }

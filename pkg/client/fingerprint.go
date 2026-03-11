@@ -2,12 +2,11 @@ package client
 
 import (
 	"fmt"
-	"net/http"
 	"strconv"
 	"strings"
 
+	http "github.com/aarock1234/fphttp"
 	utls "github.com/refraction-networking/utls"
-	"golang.org/x/net/http2"
 )
 
 // Browser identifies the browser for TLS and HTTP/2 fingerprinting.
@@ -42,84 +41,40 @@ const (
 	PlatformIPadOS Platform = "ipados"
 )
 
-// H2Profile contains HTTP/2 connection settings that control the fingerprint
-// of the HTTP/2 SETTINGS frame and WINDOW_UPDATE.
-type H2Profile struct {
-	Settings         []http2.Setting
-	ConnectionWindow uint32
-	Priority         http2.PriorityParam
-	PseudoOrder      []string
-}
-
-// BrowserProfile combines a TLS ClientHelloID with HTTP/2 settings and
-// default request headers for a specific browser identity.
-type BrowserProfile struct {
-	ClientHelloID  utls.ClientHelloID
-	H2             H2Profile
-	DefaultHeaders http.Header
-}
-
 const defaultBrowserVersion = "131.0.0.0"
 
-const settingEnableConnectProtocol = http2.SettingID(0x8)
-
-var h2Chrome = H2Profile{
-	Settings: []http2.Setting{
-		{ID: http2.SettingHeaderTableSize, Val: 65536},
-		{ID: http2.SettingEnablePush, Val: 0},
-		{ID: http2.SettingInitialWindowSize, Val: 6291456},
-		{ID: http2.SettingMaxHeaderListSize, Val: 262144},
-	},
-	ConnectionWindow: 15663105,
-	Priority: http2.PriorityParam{
-		Weight: 255,
-	},
-	PseudoOrder: []string{":method", ":authority", ":scheme", ":path"},
-}
-
-var h2Safari = H2Profile{
-	Settings: []http2.Setting{
-		{ID: http2.SettingHeaderTableSize, Val: 4096},
-		{ID: http2.SettingEnablePush, Val: 0},
-		{ID: http2.SettingInitialWindowSize, Val: 2097152},
-		{ID: http2.SettingMaxConcurrentStreams, Val: 100},
-		{ID: settingEnableConnectProtocol, Val: 1},
-	},
-	ConnectionWindow: 10485760,
-	Priority: http2.PriorityParam{
-		Weight: 254,
-	},
-	PseudoOrder: []string{":method", ":scheme", ":path", ":authority"},
-}
-
-var h2Firefox = H2Profile{
-	Settings: []http2.Setting{
-		{ID: http2.SettingHeaderTableSize, Val: 65536},
-		{ID: http2.SettingInitialWindowSize, Val: 131072},
-		{ID: http2.SettingMaxFrameSize, Val: 16384},
-	},
-	ConnectionWindow: 12517377,
-	Priority: http2.PriorityParam{
-		StreamDep: 13,
-		Weight:    41,
-	},
-	PseudoOrder: []string{":method", ":path", ":authority", ":scheme"},
-}
-
-// resolveProfile returns a BrowserProfile for the given browser, version,
+// resolveFingerprint returns an fphttp Fingerprint for the given browser
 // and platform combination.
-func resolveProfile(browser Browser, version string, platform Platform) BrowserProfile {
+func resolveFingerprint(browser Browser, platform Platform) *http.Fingerprint {
 	switch browser {
 	case BrowserSafari:
-		return safariProfile(version, platform)
+		fp := http.Safari()
+		if platform == PlatformIOS || platform == PlatformIPadOS {
+			fp.ClientHelloID = utls.HelloIOS_Auto
+		}
+
+		return fp
 	case BrowserFirefox:
-		return firefoxProfile(version, platform)
+		return http.Firefox()
 	default:
-		return chromiumProfile(browser, version, platform)
+		return http.Chrome()
 	}
 }
 
-func chromiumProfile(browser Browser, version string, platform Platform) BrowserProfile {
+// resolveDefaultHeaders returns default request headers for the given
+// browser, version, and platform combination.
+func resolveDefaultHeaders(browser Browser, version string, platform Platform) http.Header {
+	switch browser {
+	case BrowserSafari:
+		return safariHeaders(version, platform)
+	case BrowserFirefox:
+		return firefoxHeaders(version, platform)
+	default:
+		return chromiumHeaders(browser, version, platform)
+	}
+}
+
+func chromiumHeaders(browser Browser, version string, platform Platform) http.Header {
 	major := parseMajor(version)
 
 	var ua string
@@ -164,41 +119,27 @@ func chromiumProfile(browser Browser, version string, platform Platform) Browser
 	headers.Set("sec-ch-ua-mobile", "?0")
 	headers.Set("sec-ch-ua-platform", secChUAPlatform)
 
-	return BrowserProfile{
-		ClientHelloID:  utls.HelloChrome_Auto,
-		H2:             h2Chrome,
-		DefaultHeaders: headers,
-	}
+	return headers
 }
 
-func safariProfile(version string, platform Platform) BrowserProfile {
-	var (
-		ua            string
-		clientHelloID utls.ClientHelloID
-	)
-
+func safariHeaders(version string, platform Platform) http.Header {
+	var ua string
 	switch platform {
 	case PlatformIOS, PlatformIPadOS:
 		major := parseMajor(version)
 		minor := parseMinor(version)
 		ua = fmt.Sprintf("Mozilla/5.0 (iPhone; CPU iPhone OS %d_%d like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/%s Mobile/15E148 Safari/604.1", major, minor, version)
-		clientHelloID = utls.HelloIOS_Auto
 	default:
 		ua = fmt.Sprintf("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/%s Safari/605.1.15", version)
-		clientHelloID = utls.HelloSafari_Auto
 	}
 
 	headers := http.Header{}
 	headers.Set("user-agent", ua)
 
-	return BrowserProfile{
-		ClientHelloID:  clientHelloID,
-		H2:             h2Safari,
-		DefaultHeaders: headers,
-	}
+	return headers
 }
 
-func firefoxProfile(version string, platform Platform) BrowserProfile {
+func firefoxHeaders(version string, platform Platform) http.Header {
 	var ua string
 	switch platform {
 	case PlatformMac:
@@ -212,11 +153,7 @@ func firefoxProfile(version string, platform Platform) BrowserProfile {
 	headers := http.Header{}
 	headers.Set("user-agent", ua)
 
-	return BrowserProfile{
-		ClientHelloID:  utls.HelloFirefox_Auto,
-		H2:             h2Firefox,
-		DefaultHeaders: headers,
-	}
+	return headers
 }
 
 // parseMajor returns the major version number from a dotted version string.

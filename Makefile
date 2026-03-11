@@ -48,14 +48,14 @@ db-down:
 # [postgres]
 # Migrations
 migrate:
-	goose -dir pkg/db/migrations postgres $(DATABASE_URL) up
+	go run github.com/pressly/goose/v3/cmd/goose@latest -dir pkg/db/migrations postgres $(DATABASE_URL) up
 
 migrate-down:
-	goose -dir pkg/db/migrations postgres $(DATABASE_URL) down
+	go run github.com/pressly/goose/v3/cmd/goose@latest -dir pkg/db/migrations postgres $(DATABASE_URL) down
 
 migrate-new:
 	@read -p "Migration name: " name && \
-	goose -dir pkg/db/migrations create $$name sql
+	go run github.com/pressly/goose/v3/cmd/goose@latest -dir pkg/db/migrations create $$name sql
 # [/postgres]
 
 # Go Commands
@@ -66,7 +66,7 @@ fix:
 	go fix ./...
 
 lint:
-	golangci-lint run
+	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest run 
 
 format:
 	go fmt ./...

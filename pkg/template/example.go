@@ -2,7 +2,8 @@ package template
 
 import (
 	"context"
-	"net/http"
+
+	http "github.com/aarock1234/fphttp"
 )
 
 type exampleRequest struct {

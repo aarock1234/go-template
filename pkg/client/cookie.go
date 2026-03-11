@@ -3,10 +3,11 @@ package client
 import (
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"strconv"
 	"strings"
 	"time"
+
+	http "github.com/aarock1234/fphttp"
 )
 
 // CookieExtractor extracts cookies from an HTTP response.

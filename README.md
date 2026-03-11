@@ -4,7 +4,7 @@
 ![License](https://img.shields.io/badge/License-Elastic_2.0-blue)
 ![CI](https://github.com/aarock1234/go-template/actions/workflows/ci.yaml/badge.svg)
 
-An opinionated Go project template for scraper, bot, and service workloads. Batteries included: TLS-fingerprinted HTTP clients, exponential backoff, bounded concurrency, file-backed state, PostgreSQL, and structured logging.
+An opinionated Go project template for scraper, bot, and service workloads. Batteries included: TLS-fingerprinted HTTP client via [`fphttp`](https://github.com/aarock1234/fphttp), exponential backoff, bounded concurrency, file-backed state, PostgreSQL, and structured logging.
 
 ## Quick Start
 
@@ -61,7 +61,7 @@ make up
 go-template/
 ├── cmd/template/       entrypoint
 ├── pkg/
-│   ├── client/         HTTP client with TLS/HTTP2 fingerprinting, proxy, cookies
+│   ├── client/         HTTP client via fphttp (TLS/HTTP2 fingerprinting, proxy, cookies)
 │   ├── cycle/          thread-safe round-robin file rotator
 │   ├── db/             PostgreSQL pool, sqlc queries, transactions, advisory locks
 │   ├── env/            .env loader and struct-tag validation

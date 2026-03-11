@@ -1,36 +1,84 @@
 package client
 
 import (
-	"net/http"
-	"net/http/cookiejar"
 	"net/url"
+	"strings"
+	"sync"
+
+	http "github.com/aarock1234/fphttp"
 )
 
-var _ http.CookieJar = (*CookieJar)(nil)
-
-// CookieJar is a cookie jar that accepts cookie values containing
-// double-quote characters. It wraps the standard library's cookiejar
-// with relaxed validation.
+// CookieJar stores cookies with domain-aware matching. Cookies set with
+// a leading-dot domain (e.g. ".uber.com") match any subdomain.
 type CookieJar struct {
-	jar *cookiejar.Jar
+	mu      sync.Mutex
+	cookies map[string][]*http.Cookie // keyed by effective domain
 }
 
-func newCookieJar() (*CookieJar, error) {
-	jar, err := cookiejar.New(nil)
-	if err != nil {
-		return nil, err
+func newCookieJar() *CookieJar {
+	return &CookieJar{
+		cookies: make(map[string][]*http.Cookie),
+	}
+}
+
+// SetCookies stores cookies for the given URL. Each cookie is keyed by
+// its Domain field when set, otherwise by the URL's host.
+func (j *CookieJar) SetCookies(u *url.URL, cookies []*http.Cookie) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+
+	for _, c := range cookies {
+		domain := c.Domain
+		if domain == "" {
+			domain = u.Host
+		}
+
+		existing := j.cookies[domain]
+		replaced := false
+		for i, e := range existing {
+			if e.Name == c.Name {
+				existing[i] = c
+				replaced = true
+
+				break
+			}
+		}
+
+		if !replaced {
+			existing = append(existing, c)
+		}
+
+		j.cookies[domain] = existing
+	}
+}
+
+// Cookies returns all cookies whose domain matches the given URL's host.
+func (j *CookieJar) Cookies(u *url.URL) []*http.Cookie {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+
+	host := u.Host
+	var result []*http.Cookie
+
+	for domain, cookies := range j.cookies {
+		if domainMatch(host, domain) {
+			result = append(result, cookies...)
+		}
 	}
 
-	return &CookieJar{jar: jar}, nil
+	return result
 }
 
-// SetCookies stores cookies for the given URL. Cookie values may contain
-// double-quote characters that the standard library would reject.
-func (j *CookieJar) SetCookies(u *url.URL, cookies []*http.Cookie) {
-	j.jar.SetCookies(u, cookies)
-}
+// domainMatch reports whether host matches the given cookie domain.
+// A leading-dot domain (e.g. ".uber.com") matches any subdomain.
+func domainMatch(host, domain string) bool {
+	if host == domain {
+		return true
+	}
 
-// Cookies returns the cookies for the given URL.
-func (j *CookieJar) Cookies(u *url.URL) []*http.Cookie {
-	return j.jar.Cookies(u)
+	if strings.HasPrefix(domain, ".") {
+		return strings.HasSuffix(host, domain) || host == domain[1:]
+	}
+
+	return false
 }

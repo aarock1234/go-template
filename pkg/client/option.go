@@ -1,8 +1,7 @@
 package client
 
 import (
-	"net/http"
-
+	http "github.com/aarock1234/fphttp"
 	utls "github.com/refraction-networking/utls"
 )
 
@@ -19,7 +18,7 @@ func WithBrowser(b Browser) Option {
 	return func(c *Client) { c.browser = b }
 }
 
-// WithBrowserVersion sets the browser version for TLS fingerprinting.
+// WithBrowserVersion sets the browser version for default header generation.
 func WithBrowserVersion(v string) Option {
 	return func(c *Client) { c.browserVersion = v }
 }
@@ -31,12 +30,7 @@ func WithPlatform(p Platform) Option {
 
 // WithClientHelloID overrides the TLS ClientHelloID from the browser profile.
 func WithClientHelloID(id utls.ClientHelloID) Option {
-	return func(c *Client) { c.clientHelloID = new(id) }
-}
-
-// WithH2Profile overrides the HTTP/2 profile from the browser profile.
-func WithH2Profile(p H2Profile) Option {
-	return func(c *Client) { c.h2Profile = &p }
+	return func(c *Client) { c.clientHelloID = &id }
 }
 
 // WithCookieExtractor replaces the default Set-Cookie extraction.
@@ -47,21 +41,6 @@ func WithCookieExtractor(fn CookieExtractor) Option {
 // WithDefaultHeaderOverrides overrides browser profile default headers.
 func WithDefaultHeaderOverrides(h http.Header) Option {
 	return func(c *Client) { c.defaultHeaderOverrides = h.Clone() }
-}
-
-// WithDisableKeepAlives controls whether HTTP keep-alives are disabled.
-func WithDisableKeepAlives(d bool) Option {
-	return func(c *Client) { c.disableKeepAlives = d }
-}
-
-// WithDisableSessionTickets controls whether TLS session tickets are disabled.
-func WithDisableSessionTickets(d bool) Option {
-	return func(c *Client) { c.disableSessionTickets = d }
-}
-
-// WithInsecureSkipVerify controls whether TLS certificate verification is skipped.
-func WithInsecureSkipVerify(d bool) Option {
-	return func(c *Client) { c.insecureSkipVerify = d }
 }
 
 // WithDisableDecompression controls whether automatic response decompression is disabled.

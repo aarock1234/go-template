@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net/http"
 
+	http "github.com/aarock1234/fphttp"
 	"github.com/andybalholm/brotli"
 	"github.com/klauspost/compress/zstd"
 )
