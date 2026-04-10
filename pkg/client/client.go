@@ -34,11 +34,12 @@ type Client struct {
 	clientHelloID          *utls.ClientHelloID
 	defaultHeaderOverrides http.Header
 	disableDecompression   bool
+	insecureSkipVerify     bool
 	defaultHeaders         http.Header
 }
 
 // New creates a new Client with the given options. Defaults to Chrome on
-// Windows with TLS verification skipped.
+// Windows with TLS verification enabled.
 func New(opts ...Option) (*Client, error) {
 	c := &Client{
 		browser:        BrowserChrome,
@@ -72,7 +73,7 @@ func New(opts ...Option) (*Client, error) {
 
 	transport := &http.Transport{
 		Fingerprint:     fp,
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: c.insecureSkipVerify},
 	}
 
 	if c.proxy != nil {

@@ -15,6 +15,8 @@ import (
 	"github.com/charmbracelet/huh"
 )
 
+var errUserAborted = errors.New("user aborted")
+
 // setup holds the user's configuration choices collected from the form.
 type setup struct {
 	server    bool
@@ -27,6 +29,17 @@ type setup struct {
 }
 
 func main() {
+	if err := run(); err != nil {
+		if errors.Is(err, errUserAborted) {
+			os.Exit(130)
+		}
+
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
 	s := setup{
 		server:   true,
 		client:   true,
@@ -102,21 +115,23 @@ func main() {
 				Value(&s.confirm),
 		),
 	).WithTheme(theme()).Run()
-
 	if err != nil {
 		if errors.Is(err, huh.ErrUserAborted) {
-			os.Exit(130)
+			return errUserAborted
 		}
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
+
+		return err
 	}
 
 	if !s.confirm {
 		fmt.Println("setup cancelled")
-		os.Exit(0)
+
+		return nil
 	}
 
 	apply(s)
+
+	return nil
 }
 
 // packageSelect builds a multi-select field from the optionalPackages registry.

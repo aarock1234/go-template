@@ -3,18 +3,20 @@
 package template
 
 import (
+	"fmt"
+
 	"github.com/aarock1234/go-template/pkg/client"
 	"github.com/aarock1234/go-template/pkg/db"
 )
 
-// Template orchestrates HTTP requests and database access for a single domain.
-type Template struct {
+// Service orchestrates HTTP requests and database access for a single domain.
+type Service struct {
 	db     *db.DB
 	client *client.Client
 }
 
-// New creates a Template with an HTTP client configured for the given proxy.
-func New(db *db.DB, proxy *client.Proxy) (*Template, error) {
+// New creates a Service with an HTTP client configured for the given proxy.
+func New(db *db.DB, proxy *client.Proxy) (*Service, error) {
 	var opts []client.Option
 	if proxy != nil {
 		opts = append(opts, client.WithProxy(proxy))
@@ -22,10 +24,10 @@ func New(db *db.DB, proxy *client.Proxy) (*Template, error) {
 
 	c, err := client.New(opts...)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create client: %w", err)
 	}
 
-	return &Template{
+	return &Service{
 		db:     db,
 		client: c,
 	}, nil

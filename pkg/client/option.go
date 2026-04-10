@@ -47,3 +47,10 @@ func WithDefaultHeaderOverrides(h http.Header) Option {
 func WithDisableDecompression(d bool) Option {
 	return func(c *Client) { c.disableDecompression = d }
 }
+
+// WithInsecureSkipVerify controls whether TLS certificate verification is
+// skipped. This should only be enabled for scraping targets or test
+// environments where certificate validation is not possible.
+func WithInsecureSkipVerify(skip bool) Option {
+	return func(c *Client) { c.insecureSkipVerify = skip }
+}

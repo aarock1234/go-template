@@ -22,7 +22,7 @@ var defaultHeaders = http.Header{
 
 // do executes an HTTP request and returns the response. The caller is
 // responsible for closing the response body.
-func (t *Template) do(ctx context.Context, method, path string, body io.Reader, contentType string, headers http.Header) (*http.Response, error) {
+func (s *Service) do(ctx context.Context, method, path string, body io.Reader, contentType string, headers http.Header) (*http.Response, error) {
 	fullURL := baseURL + path
 	if _, err := url.Parse(fullURL); err != nil {
 		return nil, fmt.Errorf("invalid url %q: %w", fullURL, err)
@@ -42,7 +42,7 @@ func (t *Template) do(ctx context.Context, method, path string, body io.Reader, 
 		req.Header.Set(k, strings.Join(v, ", "))
 	}
 
-	resp, err := t.client.Do(req)
+	resp, err := s.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("executing request: %w", err)
 	}
@@ -59,13 +59,13 @@ func (t *Template) do(ctx context.Context, method, path string, body io.Reader, 
 // doJSON sends an HTTP request with an optional JSON payload and decodes
 // the JSON response into T. doJSON is a top-level function because Go
 // does not support generic methods.
-func doJSON[T any](ctx context.Context, t *Template, method, path string, payload any) (*T, error) {
+func doJSON[T any](ctx context.Context, s *Service, method, path string, payload any) (*T, error) {
 	body, contentType, err := marshalPayload(payload)
 	if err != nil {
 		return nil, err
 	}
 
-	resp, err := t.do(ctx, method, path, body, contentType, nil)
+	resp, err := s.do(ctx, method, path, body, contentType, nil)
 	if err != nil {
 		return nil, err
 	}

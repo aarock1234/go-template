@@ -72,11 +72,9 @@ func init() {
 }
 
 func logLevelFromEnv() slog.Level {
-	switch strings.ToLower(
-		strings.TrimSpace(
-			os.Getenv("LOG_LEVEL"),
-		),
-	) {
+	level := strings.ToLower(strings.TrimSpace(os.Getenv("LOG_LEVEL")))
+
+	switch level {
 	case "debug":
 		return slog.LevelDebug
 	case "info":

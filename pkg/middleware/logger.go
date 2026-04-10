@@ -15,6 +15,10 @@ func Logger(next http.Handler) http.Handler {
 
 		next.ServeHTTP(rw, r)
 
+		if !rw.wrote {
+			rw.status = http.StatusOK
+		}
+
 		slog.InfoContext(r.Context(), "request",
 			slog.String("method", r.Method),
 			slog.String("path", r.URL.Path),

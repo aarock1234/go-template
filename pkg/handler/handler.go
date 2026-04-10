@@ -9,16 +9,20 @@ import (
 
 	"github.com/aarock1234/go-template/pkg/apperr"
 	"github.com/aarock1234/go-template/pkg/respond"
-	"github.com/aarock1234/go-template/pkg/service"
 )
+
+// ExampleServicer defines the service methods used by Handler.
+type ExampleServicer interface {
+	Example(ctx context.Context) (int32, error)
+}
 
 // Handler serves HTTP requests using the service layer.
 type Handler struct {
-	svc *service.Service
+	svc ExampleServicer
 }
 
 // New creates a Handler backed by the given service.
-func New(svc *service.Service) *Handler {
+func New(svc ExampleServicer) *Handler {
 	return &Handler{svc: svc}
 }
 

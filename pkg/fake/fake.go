@@ -8,27 +8,27 @@ import (
 	"sync"
 )
 
-// Generator creates fake data for Uber account registration
+// Generator creates fake data for testing and development.
 type Generator struct {
 	mu sync.Mutex
 }
 
-// New creates a new generator with a random seed
+// New creates a Generator.
 func New() *Generator {
 	return &Generator{}
 }
 
-// FirstName generates a random first name
+// FirstName generates a random first name.
 func (g *Generator) FirstName() string {
 	return g.randomFrom(firstNames)
 }
 
-// LastName generates a random last name
+// LastName generates a random last name.
 func (g *Generator) LastName() string {
 	return g.randomFrom(lastNames)
 }
 
-// Email generates a random email address
+// Email generates a random email address.
 func (g *Generator) Email() string {
 	return g.email(g.FirstName(), g.LastName(), g.randomFrom(emailDomains))
 }

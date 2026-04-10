@@ -28,6 +28,8 @@ func New(ctx context.Context, url string) (*DB, error) {
 	}
 
 	if err := pool.Ping(ctx); err != nil {
+		pool.Close()
+
 		return nil, fmt.Errorf("ping database: %w", err)
 	}
 

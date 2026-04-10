@@ -22,12 +22,12 @@ type TLSFingerprint struct {
 }
 
 // Example demonstrates a POST request with JSON payload and typed response.
-func (t *Template) Example(ctx context.Context) (*ExampleResponse, error) {
+func (s *Service) Example(ctx context.Context) (*ExampleResponse, error) {
 	payload := exampleRequest{
 		Example: "example",
 	}
 
-	resp, err := doJSON[ExampleResponse](ctx, t, http.MethodPost, "/api/all", payload)
+	resp, err := doJSON[ExampleResponse](ctx, s, http.MethodPost, "/api/all", payload)
 	if err != nil {
 		return nil, err
 	}
