@@ -1,6 +1,7 @@
 package env
 
 import (
+	"encoding"
 	"fmt"
 	"os"
 	"reflect"
@@ -18,9 +19,12 @@ var durationType = reflect.TypeFor[time.Duration]()
 //
 //	`env:"VAR_NAME"`                — optional, zero value default
 //	`env:"VAR_NAME,required"`       — must be set and non-empty
-//	`env:"VAR_NAME,default=value"`  — uses value when unset
+//	`env:"VAR_NAME,default=value"`  — uses value when unset or empty
 //
-// Supported field types: string, int, int64, bool, time.Duration.
+// A default value cannot contain a comma. Supported field types are
+// strings, booleans, integers, unsigned integers, floats, time.Duration,
+// and types whose pointer implements encoding.TextUnmarshaler, such as
+// slog.Level.
 func New[T any](path ...string) (*T, error) {
 	if err := Load(path...); err != nil {
 		return nil, fmt.Errorf("env: load: %w", err)
@@ -34,9 +38,8 @@ func New[T any](path ...string) (*T, error) {
 	return &config, nil
 }
 
-// populate reads environment variables into a struct using its field tags.
-// It returns an error if config is not a pointer to a struct or has no
-// fields with env tags.
+// populate reads environment variables into the struct config points to,
+// using its field tags. Every missing required variable is reported.
 func populate(config any) error {
 	v := reflect.ValueOf(config)
 	if v.Kind() != reflect.Pointer || v.Elem().Kind() != reflect.Struct {
@@ -46,50 +49,42 @@ func populate(config any) error {
 	v = v.Elem()
 	t := v.Type()
 
-	hasTag := false
-	for field := range t.Fields() {
-		if field.Tag.Get("env") != "" {
-			hasTag = true
-			break
-		}
-	}
+	var (
+		tagged  bool
+		missing []string
+	)
 
-	if !hasTag {
-		return fmt.Errorf("env: %s has no fields with env tags", t.Name())
-	}
-
-	var missing []string
 	for field := range t.Fields() {
 		tag := field.Tag.Get("env")
 		if tag == "" {
 			continue
 		}
 
-		name, rest, hasOpts := strings.Cut(tag, ",")
-		var required bool
-		var defaultVal string
-		if hasOpts {
-			required, defaultVal = parseOpts(rest)
+		tagged = true
+
+		name, options, _ := strings.Cut(tag, ",")
+		required, defaultValue := parseOptions(options)
+
+		value := os.Getenv(name)
+		if value == "" {
+			value = defaultValue
 		}
 
-		val := os.Getenv(name)
-		if val == "" {
+		if value == "" {
 			if required {
 				missing = append(missing, name)
-				continue
 			}
-			if defaultVal != "" {
-				val = defaultVal
-			}
-		}
 
-		if val == "" {
 			continue
 		}
 
-		if err := setField(v.FieldByIndex(field.Index), val); err != nil {
+		if err := setField(v.FieldByIndex(field.Index), value); err != nil {
 			return fmt.Errorf("env: set %s: %w", name, err)
 		}
+	}
+
+	if !tagged {
+		return fmt.Errorf("env: %s has no fields with env tags", t.Name())
 	}
 
 	if len(missing) > 0 {
@@ -99,52 +94,76 @@ func populate(config any) error {
 	return nil
 }
 
-// parseOpts extracts the required flag and default value from tag options.
-func parseOpts(opts string) (required bool, defaultVal string) {
-	for opt := range strings.SplitSeq(opts, ",") {
-		switch {
-		case opt == "required":
+// parseOptions extracts the required flag and default value from tag
+// options.
+func parseOptions(options string) (required bool, defaultValue string) {
+	for option := range strings.SplitSeq(options, ",") {
+		if option == "required" {
 			required = true
-		case strings.HasPrefix(opt, "default="):
-			defaultVal = strings.TrimPrefix(opt, "default=")
+		}
+
+		if value, ok := strings.CutPrefix(option, "default="); ok {
+			defaultValue = value
 		}
 	}
 
-	return required, defaultVal
+	return required, defaultValue
 }
 
-// setField assigns a string value to a reflect.Value based on its type.
-func setField(field reflect.Value, val string) error {
+// setField parses value into field according to the field's type.
+func setField(field reflect.Value, value string) error {
 	if field.Type() == durationType {
-		d, err := time.ParseDuration(val)
+		d, err := time.ParseDuration(value)
 		if err != nil {
 			return fmt.Errorf("parse duration: %w", err)
 		}
+
 		field.SetInt(int64(d))
+
+		return nil
+	}
+
+	if unmarshaler, ok := field.Addr().Interface().(encoding.TextUnmarshaler); ok {
+		if err := unmarshaler.UnmarshalText([]byte(value)); err != nil {
+			return fmt.Errorf("parse %s: %w", field.Type(), err)
+		}
 
 		return nil
 	}
 
 	switch field.Kind() {
 	case reflect.String:
-		field.SetString(val)
-
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		n, err := strconv.ParseInt(val, 10, 64)
-		if err != nil {
-			return fmt.Errorf("parse int: %w", err)
-		}
-		field.SetInt(n)
-
+		field.SetString(value)
 	case reflect.Bool:
-		b, err := strconv.ParseBool(val)
+		b, err := strconv.ParseBool(value)
 		if err != nil {
 			return fmt.Errorf("parse bool: %w", err)
 		}
-		field.SetBool(b)
 
+		field.SetBool(b)
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		n, err := strconv.ParseInt(value, 10, field.Type().Bits())
+		if err != nil {
+			return fmt.Errorf("parse int: %w", err)
+		}
+
+		field.SetInt(n)
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		n, err := strconv.ParseUint(value, 10, field.Type().Bits())
+		if err != nil {
+			return fmt.Errorf("parse uint: %w", err)
+		}
+
+		field.SetUint(n)
+	case reflect.Float32, reflect.Float64:
+		f, err := strconv.ParseFloat(value, field.Type().Bits())
+		if err != nil {
+			return fmt.Errorf("parse float: %w", err)
+		}
+
+		field.SetFloat(f)
 	default:
-		return fmt.Errorf("unsupported type: %s", field.Kind())
+		return fmt.Errorf("unsupported type %s", field.Type())
 	}
 
 	return nil

@@ -2,6 +2,7 @@ package client
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -10,190 +11,193 @@ import (
 	http "github.com/aarock1234/fphttp"
 )
 
-// CookieExtractor extracts cookies from an HTTP response.
-// Called after each round trip, including intermediate redirects.
-// The returned cookies are stored in the client's jar.
+// CookieExtractor extracts cookies from an HTTP response. It is called
+// after each round trip, including intermediate redirects, and the returned
+// cookies are stored in the client's jar. An error fails the request.
 type CookieExtractor func(resp *http.Response) ([]*http.Cookie, error)
 
-// DefaultCookieExtractor parses standard Set-Cookie response headers using
-// relaxed parsing that allows double-quote characters in cookie values.
+// DefaultCookieExtractor parses the response's Set-Cookie headers with
+// ParseSetCookie. Like a browser, it skips headers it cannot parse.
 func DefaultCookieExtractor(resp *http.Response) ([]*http.Cookie, error) {
 	var cookies []*http.Cookie
-	for _, raw := range resp.Header.Values("Set-Cookie") {
-		parsed, err := ParseSetCookie(raw)
+
+	for _, line := range resp.Header.Values("Set-Cookie") {
+		cookie, err := ParseSetCookie(line)
 		if err != nil {
-			return nil, fmt.Errorf("parsing set-cookie: %w", err)
+			continue
 		}
 
-		cookies = append(cookies, parsed)
+		cookies = append(cookies, cookie)
 	}
 
 	return cookies, nil
 }
 
-// ParseCookies parses a raw cookie string (name=value; name2=value2) into
-// an http.Cookie slice. JSON array format is also supported.
-func ParseCookies(cookieStr string) []*http.Cookie {
-	cookieStr = strings.TrimSpace(cookieStr)
+// ParseCookies parses a Cookie header value ("name=value; name2=value2") or
+// a JSON array of cookie objects. Header pairs without a name or "=" are
+// skipped.
+func ParseCookies(s string) ([]*http.Cookie, error) {
+	s = strings.TrimSpace(s)
 
-	if strings.HasPrefix(cookieStr, "[") {
-		cookies, err := parseJSONCookies(cookieStr)
-		if err != nil {
-			return nil
+	if strings.HasPrefix(s, "[") {
+		var cookies []*http.Cookie
+		if err := json.Unmarshal([]byte(s), &cookies); err != nil {
+			return nil, fmt.Errorf("decode json cookies: %w", err)
 		}
 
-		return cookies
+		return cookies, nil
 	}
 
 	var cookies []*http.Cookie
-	for cookie := range strings.SplitSeq(cookieStr, ";") {
-		cookie = strings.TrimSpace(cookie)
-		if cookie == "" {
-			continue
-		}
 
-		parts := strings.SplitN(cookie, "=", 2)
-		if len(parts) != 2 {
+	for pair := range strings.SplitSeq(s, ";") {
+		name, value, ok := strings.Cut(strings.TrimSpace(pair), "=")
+		if !ok || name == "" {
 			continue
 		}
 
 		cookies = append(cookies, &http.Cookie{
-			Name:  parts[0],
-			Value: parts[1],
+			Name:  name,
+			Value: value,
 		})
 	}
 
-	return cookies
+	return cookies, nil
 }
 
-// ParseSetCookie parses a single Set-Cookie header line using relaxed
-// validation that allows double-quote characters in cookie values.
+// ParseSetCookie parses a Set-Cookie header line. Unlike net/http, it
+// accepts double quotes inside cookie values. Unknown or malformed
+// attributes are ignored, as browsers do.
 func ParseSetCookie(line string) (*http.Cookie, error) {
-	var (
-		cookie http.Cookie
-		first  = true
-	)
+	pair, attributes, _ := strings.Cut(line, ";")
 
-	for part := range strings.SplitSeq(line, ";") {
-		part = strings.TrimSpace(part)
-		if part == "" {
-			continue
-		}
+	name, value, ok := strings.Cut(strings.TrimSpace(pair), "=")
+	if !ok {
+		return nil, errors.New("missing = in cookie name-value pair")
+	}
 
-		if first {
-			first = false
-			eq := strings.IndexByte(part, '=')
-			if eq < 0 {
-				return nil, fmt.Errorf("missing = in cookie name-value pair: %q", part)
-			}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil, errors.New("empty cookie name")
+	}
 
-			cookie.Name = part[:eq]
-			value := part[eq+1:]
+	cookie := &http.Cookie{
+		Name: name,
+		Raw:  line,
+	}
 
-			// Strip surrounding quotes and mark as quoted.
-			if len(value) >= 2 && value[0] == '"' && value[len(value)-1] == '"' {
-				value = value[1 : len(value)-1]
-				cookie.Quoted = true
-			}
+	value = strings.TrimSpace(value)
+	if len(value) >= 2 && value[0] == '"' && value[len(value)-1] == '"' {
+		value = value[1 : len(value)-1]
+		cookie.Quoted = true
+	}
 
-			// Validate value bytes with relaxed rules.
-			for i := range len(value) {
-				if !validCookieValueByte(value[i]) {
-					return nil, fmt.Errorf("invalid byte %#x in cookie value", value[i])
-				}
-			}
-
-			cookie.Value = value
-
-			continue
-		}
-
-		lowerPart := strings.ToLower(part)
-
-		if lowerPart == "secure" {
-			cookie.Secure = true
-
-			continue
-		}
-
-		if lowerPart == "httponly" {
-			cookie.HttpOnly = true
-
-			continue
-		}
-
-		if lowerPart == "partitioned" {
-			cookie.Partitioned = true
-
-			continue
-		}
-
-		eq := strings.IndexByte(part, '=')
-		if eq < 0 {
-			continue
-		}
-
-		attrName := strings.ToLower(strings.TrimSpace(part[:eq]))
-		attrVal := strings.TrimSpace(part[eq+1:])
-
-		switch attrName {
-		case "domain":
-			cookie.Domain = attrVal
-		case "path":
-			cookie.Path = attrVal
-		case "expires":
-			t, err := time.Parse(time.RFC1123, attrVal)
-			if err != nil {
-				t, err = time.Parse("Mon, 02-Jan-2006 15:04:05 MST", attrVal)
-				if err != nil {
-					continue
-				}
-			}
-			cookie.Expires = t
-			cookie.RawExpires = attrVal
-		case "max-age":
-			n, err := strconv.Atoi(attrVal)
-			if err != nil {
-				continue
-			}
-			cookie.MaxAge = n
-		case "samesite":
-			switch strings.ToLower(attrVal) {
-			case "lax":
-				cookie.SameSite = http.SameSiteLaxMode
-			case "strict":
-				cookie.SameSite = http.SameSiteStrictMode
-			case "none":
-				cookie.SameSite = http.SameSiteNoneMode
-			}
+	for i := range len(value) {
+		if !validCookieValueByte(value[i]) {
+			return nil, fmt.Errorf("invalid byte %#x in cookie value", value[i])
 		}
 	}
 
-	return &cookie, nil
+	cookie.Value = value
+
+	for attribute := range strings.SplitSeq(attributes, ";") {
+		applyCookieAttribute(cookie, attribute)
+	}
+
+	return cookie, nil
 }
 
-// GetCookieByName finds a cookie by name from a cookie string.
-func GetCookieByName(cookieStr, name string) *http.Cookie {
-	for _, cookie := range ParseCookies(cookieStr) {
-		if cookie.Name == name {
-			return cookie
+// applyCookieAttribute applies one Set-Cookie attribute to cookie.
+func applyCookieAttribute(cookie *http.Cookie, attribute string) {
+	name, value, _ := strings.Cut(attribute, "=")
+	name = strings.ToLower(strings.TrimSpace(name))
+	value = strings.TrimSpace(value)
+
+	switch name {
+	case "secure":
+		cookie.Secure = true
+	case "httponly":
+		cookie.HttpOnly = true
+	case "partitioned":
+		cookie.Partitioned = true
+	case "domain":
+		cookie.Domain = value
+	case "path":
+		cookie.Path = value
+	case "expires":
+		expires, err := parseCookieTime(value)
+		if err != nil {
+			return
+		}
+
+		cookie.Expires = expires.UTC()
+		cookie.RawExpires = value
+	case "max-age":
+		seconds, err := strconv.Atoi(value)
+		if err != nil || seconds != 0 && value[0] == '0' {
+			return
+		}
+
+		// net/http represents "delete now" as a negative MaxAge, since
+		// zero means the attribute is absent.
+		if seconds <= 0 {
+			seconds = -1
+		}
+
+		cookie.MaxAge = seconds
+	case "samesite":
+		switch strings.ToLower(value) {
+		case "lax":
+			cookie.SameSite = http.SameSiteLaxMode
+		case "strict":
+			cookie.SameSite = http.SameSiteStrictMode
+		case "none":
+			cookie.SameSite = http.SameSiteNoneMode
+		default:
+			cookie.SameSite = http.SameSiteDefaultMode
 		}
 	}
+}
 
-	return nil
+// parseCookieTime parses an Expires attribute in the HTTP date formats or
+// the dashed Netscape format.
+func parseCookieTime(value string) (time.Time, error) {
+	if t, err := http.ParseTime(value); err == nil {
+		return t, nil
+	}
+
+	return time.Parse("Mon, 02-Jan-2006 15:04:05 MST", value)
+}
+
+// cookieHeader formats cookies as a Cookie header value, restoring the
+// quotes of quoted values.
+func cookieHeader(cookies []*http.Cookie) string {
+	var b strings.Builder
+
+	for i, cookie := range cookies {
+		if i > 0 {
+			b.WriteString("; ")
+		}
+
+		b.WriteString(cookie.Name)
+		b.WriteByte('=')
+
+		if cookie.Quoted {
+			b.WriteByte('"')
+			b.WriteString(cookie.Value)
+			b.WriteByte('"')
+
+			continue
+		}
+
+		b.WriteString(cookie.Value)
+	}
+
+	return b.String()
 }
 
 // validCookieValueByte reports whether b is a valid byte in a cookie value.
-// This is a relaxed version that allows double-quote characters.
+// This is a relaxed version of RFC 6265 that allows double quotes.
 func validCookieValueByte(b byte) bool {
 	return 0x20 <= b && b < 0x7f && b != ';' && b != '\\'
-}
-
-func parseJSONCookies(cookieStr string) ([]*http.Cookie, error) {
-	var serialized []*http.Cookie
-	if err := json.Unmarshal([]byte(cookieStr), &serialized); err != nil {
-		return nil, fmt.Errorf("parsing cookies json: %w", err)
-	}
-
-	return serialized, nil
 }

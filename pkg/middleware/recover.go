@@ -1,28 +1,44 @@
 package middleware
 
 import (
+	"errors"
 	"log/slog"
 	"net/http"
 	"runtime/debug"
+
+	"github.com/aarock1234/go-template/pkg/respond"
 )
 
-// Recover catches panics in downstream handlers, logs the stack trace,
-// and returns a 500 JSON error response.
+// Recover catches panics in downstream handlers, logs them with a stack
+// trace, and responds with a 500 JSON error unless the response has
+// already started. http.ErrAbortHandler is re-panicked so the server
+// aborts the response as the handler intended.
 func Recover(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer func() {
-			if v := recover(); v != nil {
-				slog.ErrorContext(r.Context(), "panic recovered",
-					slog.Any("panic", v),
-					slog.String("stack", string(debug.Stack())),
-				)
+		rw := &responseWriter{
+			ResponseWriter: w,
+		}
 
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusInternalServerError)
-				_, _ = w.Write([]byte(`{"error":"internal error","status":500}`))
+		defer func() {
+			v := recover()
+			if v == nil {
+				return
+			}
+
+			if err, ok := v.(error); ok && errors.Is(err, http.ErrAbortHandler) {
+				panic(v)
+			}
+
+			slog.ErrorContext(r.Context(), "panic recovered",
+				slog.Any("panic", v),
+				slog.String("stack", string(debug.Stack())),
+			)
+
+			if !rw.wrote {
+				respond.Error(rw, http.StatusInternalServerError, "internal error")
 			}
 		}()
 
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(rw, r)
 	})
 }

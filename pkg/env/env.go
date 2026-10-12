@@ -1,11 +1,14 @@
 // Package env loads environment variables from a .env file into the process
-// environment and validates required variables into a typed Config.
-// Existing process environment variables take precedence over file-defined values.
+// environment and populates a typed configuration struct from them.
+// Existing process environment variables take precedence over file-defined
+// values.
 package env
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"strings"
@@ -17,11 +20,14 @@ var (
 	loaded = make(map[string]error)
 )
 
-// Load reads key=value pairs from a .env file and sets them in the process
-// environment. Existing variables are not overwritten. Repeated calls with
-// the same path are no-ops and return the cached result.
+// Load reads KEY=value lines from a .env file and sets them in the process
+// environment. Existing variables are not overwritten, a missing file is
+// not an error, and repeated calls with the same path return the cached
+// result.
 //
-// If no path is provided, ".env" is used.
+// Blank lines and lines starting with # are ignored, an optional "export "
+// prefix is allowed, and values may be wrapped in matching single or double
+// quotes. If no path is provided, ".env" is used.
 func Load(path ...string) error {
 	filename := ".env"
 	if len(path) > 0 && path[0] != "" {
@@ -42,57 +48,73 @@ func Load(path ...string) error {
 }
 
 func load(filename string) error {
-	_, err := os.Stat(filename)
+	vars, err := readFile(filename)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return fmt.Errorf("stat %q: %w", filename, err)
-	}
-
-	f, err := os.Open(filename)
-	if err != nil {
-		return fmt.Errorf("open %q: %w", filename, err)
-	}
-	defer func() { _ = f.Close() }()
-
-	vars := make(map[string]string)
-	scanner := bufio.NewScanner(f)
-
-	for n := 1; scanner.Scan(); n++ {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-
-		key, value, ok := strings.Cut(line, "=")
-		if !ok {
-			slog.Warn("env: skipping invalid line", "file", filename, "line", n)
-			continue
-		}
-
-		key = strings.TrimSpace(key)
-		value = strings.TrimSpace(value)
-
-		if len(value) >= 2 && (value[0] == '"' || value[0] == '\'') && value[0] == value[len(value)-1] {
-			value = value[1 : len(value)-1]
-		}
-
-		vars[key] = value
-	}
-
-	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("scan %q: %w", filename, err)
+		return err
 	}
 
 	for key, value := range vars {
 		if _, exists := os.LookupEnv(key); exists {
 			continue
 		}
+
 		if err := os.Setenv(key, value); err != nil {
-			slog.Warn("env: failed to set variable", "key", key, "error", err)
+			return fmt.Errorf("set %s: %w", key, err)
 		}
 	}
 
 	return nil
+}
+
+// readFile parses the variables defined in filename. Later definitions of
+// a key replace earlier ones.
+func readFile(filename string) (map[string]string, error) {
+	f, err := os.Open(filename)
+	if err != nil {
+		return nil, fmt.Errorf("open %s: %w", filename, err)
+	}
+	defer func() { _ = f.Close() }()
+
+	vars := make(map[string]string)
+
+	scanner := bufio.NewScanner(f)
+	for lineNumber := 1; scanner.Scan(); lineNumber++ {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		key, value, ok := strings.Cut(strings.TrimPrefix(line, "export "), "=")
+		key = strings.TrimSpace(key)
+
+		if !ok || key == "" {
+			slog.Warn("skipping invalid env line",
+				slog.String("file", filename),
+				slog.Int("line", lineNumber),
+			)
+
+			continue
+		}
+
+		vars[key] = unquote(strings.TrimSpace(value))
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("scan %s: %w", filename, err)
+	}
+
+	return vars, nil
+}
+
+// unquote removes one pair of matching single or double quotes around value.
+func unquote(value string) string {
+	if len(value) >= 2 && (value[0] == '"' || value[0] == '\'') && value[0] == value[len(value)-1] {
+		return value[1 : len(value)-1]
+	}
+
+	return value
 }

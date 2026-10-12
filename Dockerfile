@@ -1,28 +1,38 @@
 # syntax=docker/dockerfile:1
 
-# dev: docker compose watch (go run, full toolchain)
-FROM golang:1.26 AS dev
+# base: toolchain, downloaded modules, and source
+FROM --platform=$BUILDPLATFORM golang:1.27 AS base
 
 WORKDIR /app
 
 COPY go.mod go.sum ./
-RUN --mount=type=cache,target=/go/pkg/mod \
-    go mod download
+RUN go mod download
 
 COPY . .
 
-# builder: compiles the binary
-FROM dev AS builder
+# dev: builds from source on every start so docker compose watch can restart
+# it; exec hands signals to the app for graceful shutdown
+FROM base AS dev
 
-RUN --mount=type=cache,target=/go/pkg/mod \
-    --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /bin/template ./cmd/template
+CMD ["sh", "-c", "go build -o /tmp/template ./cmd/template && exec /tmp/template"]
 
-# production image
-FROM alpine:3.23 AS production
+# builder: cross-compiles a static binary for the target platform
+FROM base AS builder
+
+ARG TARGETOS
+ARG TARGETARCH
+
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
+    go build -trimpath -ldflags="-s -w" -o /bin/template ./cmd/template
+
+# production: minimal runtime image running as an unprivileged user
+FROM alpine:3.24 AS production
 
 RUN apk add --no-cache ca-certificates tzdata
 
 COPY --from=builder /bin/template /bin/template
+
+USER 65534:65534
 
 ENTRYPOINT ["/bin/template"]

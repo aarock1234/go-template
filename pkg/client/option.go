@@ -8,27 +8,47 @@ import (
 // Option configures a Client.
 type Option func(*Client)
 
-// WithProxy sets the proxy configuration for the client.
+// WithProxy routes requests through a copy of p. A nil p disables the
+// proxy.
 func WithProxy(p *Proxy) Option {
-	return func(c *Client) { c.proxy = p }
+	return func(c *Client) {
+		if p == nil {
+			c.proxy = nil
+
+			return
+		}
+
+		proxy := *p
+		c.proxy = &proxy
+	}
 }
 
-// WithBrowser sets the browser identity for TLS and HTTP/2 fingerprinting.
-func WithBrowser(b Browser) Option {
+// WithBrowser sets the browser whose fingerprint and identity headers the
+// client presents.
+func WithBrowser(b http.Browser) Option {
 	return func(c *Client) { c.browser = b }
 }
 
-// WithBrowserVersion sets the browser version for default header generation.
+// WithBrowserVersion overrides the browser version used in identity
+// headers. By default it matches the selected fingerprint profile.
 func WithBrowserVersion(v string) Option {
 	return func(c *Client) { c.browserVersion = v }
 }
 
-// WithPlatform sets the OS platform for TLS and HTTP/2 fingerprinting.
-func WithPlatform(p Platform) Option {
+// WithPlatform sets the operating system whose fingerprint and identity
+// headers the client presents.
+func WithPlatform(p http.Platform) Option {
 	return func(c *Client) { c.platform = p }
 }
 
-// WithClientHelloID overrides the TLS ClientHelloID from the browser profile.
+// WithFingerprint replaces the profile selected by browser and platform,
+// for example with http.Chrome148Fetch or a customized profile. New clones
+// f, so the caller keeps ownership.
+func WithFingerprint(f *http.Fingerprint) Option {
+	return func(c *Client) { c.fingerprint = f }
+}
+
+// WithClientHelloID overrides the TLS ClientHelloID of the fingerprint.
 func WithClientHelloID(id utls.ClientHelloID) Option {
 	return func(c *Client) { c.clientHelloID = &id }
 }
@@ -38,19 +58,23 @@ func WithCookieExtractor(fn CookieExtractor) Option {
 	return func(c *Client) { c.extractCookies = fn }
 }
 
-// WithDefaultHeaderOverrides overrides browser profile default headers.
+// WithDefaultHeaderOverrides overrides identity headers. An override with
+// an empty value removes the header. The option copies h.
 func WithDefaultHeaderOverrides(h http.Header) Option {
-	return func(c *Client) { c.defaultHeaderOverrides = h.Clone() }
+	snapshot := h.Clone()
+
+	return func(c *Client) { c.defaultHeaderOverrides = snapshot.Clone() }
 }
 
-// WithDisableDecompression controls whether automatic response decompression is disabled.
-func WithDisableDecompression(d bool) Option {
-	return func(c *Client) { c.disableDecompression = d }
+// WithDisableDecompression controls whether automatic response
+// decompression is disabled.
+func WithDisableDecompression(disable bool) Option {
+	return func(c *Client) { c.disableDecompression = disable }
 }
 
 // WithInsecureSkipVerify controls whether TLS certificate verification is
-// skipped. This should only be enabled for scraping targets or test
-// environments where certificate validation is not possible.
+// skipped. Enable it only for targets or test environments where
+// certificate validation is not possible.
 func WithInsecureSkipVerify(skip bool) Option {
 	return func(c *Client) { c.insecureSkipVerify = skip }
 }

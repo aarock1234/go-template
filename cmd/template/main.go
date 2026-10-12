@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"      // [server]
 	"net/http" // [server]
 	"os"
 	"os/signal"
@@ -13,27 +14,41 @@ import (
 	"time" // [server]
 
 	"github.com/go-chi/chi/v5" // [server]
+	"golang.org/x/sync/errgroup"
 
-	"github.com/aarock1234/go-template/pkg/db" // [postgres]
+	"github.com/aarock1234/go-template/pkg/client" // [client]
+	"github.com/aarock1234/go-template/pkg/db"     // [postgres]
 	"github.com/aarock1234/go-template/pkg/env"
-	"github.com/aarock1234/go-template/pkg/handler"    // [server] [postgres]
+	"github.com/aarock1234/go-template/pkg/handler" // [server]
+	"github.com/aarock1234/go-template/pkg/log"
 	"github.com/aarock1234/go-template/pkg/middleware" // [server]
 	"github.com/aarock1234/go-template/pkg/service"    // [server] [postgres]
-	"github.com/aarock1234/go-template/pkg/template"   // [client] [postgres]
-
-	_ "github.com/aarock1234/go-template/pkg/log" // structured logger init
+	"github.com/aarock1234/go-template/pkg/template"   // [client]
 )
 
-// Config holds environment variables for this process.
+// Config holds the environment configuration for this process.
 type Config struct {
+	LogLevel slog.Level `env:"LOG_LEVEL,default=info"`
+	// [client]
+	Proxy string `env:"PROXY"`
+	// [/client]
 	// [postgres]
 	DatabaseURL string `env:"DATABASE_URL,required"`
 	// [/postgres]
 	// [server]
-	Port         string        `env:"PORT,default=8080"`
-	ReadTimeout  time.Duration `env:"READ_TIMEOUT,default=10s"`
-	WriteTimeout time.Duration `env:"WRITE_TIMEOUT,default=10s"`
+	Port            string        `env:"PORT,default=8080"`
+	ReadTimeout     time.Duration `env:"READ_TIMEOUT,default=10s"`
+	WriteTimeout    time.Duration `env:"WRITE_TIMEOUT,default=10s"`
+	ShutdownTimeout time.Duration `env:"SHUTDOWN_TIMEOUT,default=10s"`
 	// [/server]
+}
+
+// app holds the dependencies shared by the process's workloads.
+type app struct {
+	config *Config
+	// [postgres]
+	database *db.DB
+	// [/postgres]
 }
 
 func main() {
@@ -43,130 +58,187 @@ func main() {
 	}
 }
 
+// run loads configuration, opens shared dependencies, and runs every
+// workload until all of them finish, one of them fails, or the process
+// receives an interrupt or termination signal.
 func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	config, err := env.New[Config]()
 	if err != nil {
-		return fmt.Errorf("loading config: %w", err)
+		return fmt.Errorf("load config: %w", err)
 	}
+
+	log.SetLevel(config.LogLevel)
+
+	app := &app{
+		config: config,
+	}
+
+	// [postgres]
+	database, err := db.New(ctx, config.DatabaseURL)
+	if err != nil {
+		return fmt.Errorf("connect database: %w", err)
+	}
+	defer database.Close()
+
+	app.database = database
+	// [/postgres]
+
+	// The first workload to fail cancels the others. Each workload returns
+	// nil when it stops because the context was canceled.
+	group, ctx := errgroup.WithContext(ctx)
 
 	// [server]
-	if err := serve(ctx, config); err != nil {
-		if cause := context.Cause(ctx); cause != nil {
-			slog.ErrorContext(ctx, "shutting down", slog.Any("cause", cause))
-
-			return nil
-		}
-
-		return err
-	}
+	group.Go(func() error {
+		return serve(ctx, app)
+	})
 	// [/server]
+
 	// [client]
-	if err := scrape(ctx, config); err != nil {
-		if cause := context.Cause(ctx); cause != nil {
-			slog.ErrorContext(ctx, "shutting down", slog.Any("cause", cause))
-
-			return nil
-		}
-
-		return err
-	}
+	group.Go(func() error {
+		return scrape(ctx, app)
+	})
 	// [/client]
 
-	return nil
+	return group.Wait()
 }
 
 // [server]
 
-// serve starts the HTTP server with graceful shutdown.
-func serve(ctx context.Context, config *Config) error {
-	// [postgres]
-	database, err := db.New(ctx, config.DatabaseURL)
-	if err != nil {
-		return fmt.Errorf("create database: %w", err)
+// serve runs the HTTP server until ctx is canceled, then shuts it down
+// within the configured timeout. A listener or shutdown failure is returned
+// even when it happens during cancellation.
+func serve(ctx context.Context, app *app) error {
+	server := &http.Server{
+		Addr:         net.JoinHostPort("", app.config.Port),
+		Handler:      routes(app),
+		ReadTimeout:  app.config.ReadTimeout,
+		WriteTimeout: app.config.WriteTimeout,
 	}
-	defer database.Close()
 
-	svc := service.New(database)
-	h := handler.New(svc)
-	// [/postgres]
+	var listenConfig net.ListenConfig
 
-	r := chi.NewRouter()
-	r.Use(middleware.Recover)
-	r.Use(middleware.RequestID)
-	r.Use(middleware.Logger)
+	listener, err := listenConfig.Listen(ctx, "tcp", server.Addr)
+	if err != nil {
+		return fmt.Errorf("listen: %w", err)
+	}
 
+	slog.InfoContext(ctx, "server listening", slog.String("addr", listener.Addr().String()))
+
+	serveResult := make(chan error, 1)
+
+	go func() {
+		serveResult <- server.Serve(listener)
+	}()
+
+	var serveErr error
+	serveFinished := false
+
+	select {
+	case err := <-serveResult:
+		serveErr = serverError(err)
+		serveFinished = true
+	case <-ctx.Done():
+		slog.InfoContext(ctx, "shutting down server", slog.Any("cause", context.Cause(ctx)))
+	}
+
+	shutdownErr := shutdownServer(server, app.config.ShutdownTimeout)
+
+	if !serveFinished {
+		serveErr = serverError(<-serveResult)
+	}
+
+	return errors.Join(serveErr, shutdownErr)
+}
+
+// routes builds the HTTP handler tree. Middleware order matters: the
+// request ID is assigned first so the logger and panic recovery can use it,
+// and recovery runs inside the logger so recovered panics are logged as 500s.
+func routes(app *app) http.Handler {
+	router := chi.NewRouter()
+	router.Use(middleware.RequestID)
+	router.Use(middleware.Logger)
+	router.Use(middleware.Recover)
+
+	router.Get("/livez", handler.Live)
 	// [postgres]
-	r.Get("/health", handler.Health(database))
-	r.Route("/api", func(r chi.Router) {
-		r.Get("/example", h.GetExample)
+	router.Get("/readyz", handler.Ready(app.database))
+
+	example := handler.New(service.New(app.database))
+
+	router.Route("/api", func(r chi.Router) {
+		r.Get("/example", example.GetExample)
 	})
 	// [/postgres]
 
-	srv := &http.Server{
-		Addr:         ":" + config.Port,
-		Handler:      r,
-		ReadTimeout:  config.ReadTimeout,
-		WriteTimeout: config.WriteTimeout,
-	}
+	return router
+}
 
-	errCh := make(chan error, 1)
-	go func() {
-		slog.InfoContext(ctx, "server listening", slog.String("addr", srv.Addr))
-		errCh <- srv.ListenAndServe()
-	}()
+// shutdownServer stops the server gracefully, forcing open connections
+// closed when the timeout expires first. It uses a fresh context because
+// the process context is already canceled.
+func shutdownServer(server *http.Server, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
 
-	select {
-	case err := <-errCh:
-		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			return fmt.Errorf("listen: %w", err)
+	if err := server.Shutdown(ctx); err != nil {
+		closeErr := server.Close()
+		if closeErr != nil {
+			closeErr = fmt.Errorf("close server: %w", closeErr)
 		}
-	case <-ctx.Done():
-		slog.InfoContext(ctx, "shutting down server")
 
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-
-		if err := srv.Shutdown(shutdownCtx); err != nil {
-			return fmt.Errorf("shutdown: %w", err)
-		}
+		return errors.Join(fmt.Errorf("shutdown server: %w", err), closeErr)
 	}
 
 	return nil
+}
+
+// serverError converts the result of Serve into an error, treating the
+// expected result of a shutdown as success.
+func serverError(err error) error {
+	if errors.Is(err, http.ErrServerClosed) {
+		return nil
+	}
+
+	return fmt.Errorf("serve: %w", err)
 }
 
 // [/server]
 
 // [client]
 
-// scrape runs the client-side scraper logic.
-func scrape(ctx context.Context, config *Config) error {
-	slog.InfoContext(ctx, "template application started")
-
-	// [postgres]
-	database, err := db.New(ctx, config.DatabaseURL)
+// scrape runs the client workload once: it fetches the fingerprint observed
+// over HTTP/1.1, then over HTTP/2. It returns nil if ctx is canceled before
+// the work completes.
+func scrape(ctx context.Context, app *app) error {
+	proxy, err := client.ParseProxy(app.config.Proxy, client.ProxySchemeHTTP)
 	if err != nil {
-		return fmt.Errorf("create database: %w", err)
-	}
-	defer database.Close()
-
-	client, err := template.New(database, nil)
-	if err != nil {
-		return fmt.Errorf("create template: %w", err)
+		return fmt.Errorf("parse proxy: %w", err)
 	}
 
-	resp, err := client.Example(ctx)
+	scraper, err := template.New(proxy)
 	if err != nil {
-		return fmt.Errorf("example: %w", err)
+		return fmt.Errorf("create scraper: %w", err)
 	}
+	defer scraper.Close()
 
-	slog.InfoContext(ctx, "example response",
-		slog.String("peetprint", resp.TLS.PeetPrint),
-		slog.String("peetprint_hash", resp.TLS.PeetPrintHash),
-	)
-	// [/postgres]
+	for _, protocol := range []template.Protocol{template.HTTP1, template.HTTP2} {
+		network, err := scraper.Network(ctx, protocol)
+		if err != nil {
+			if ctx.Err() != nil && errors.Is(err, context.Canceled) {
+				return nil
+			}
+
+			return err
+		}
+
+		slog.InfoContext(ctx, "network fingerprint",
+			slog.String("protocol", string(protocol)),
+			slog.Any("network", network),
+		)
+	}
 
 	return nil
 }

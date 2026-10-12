@@ -1,32 +1,46 @@
-// Package main implements the setup command, which configures a freshly
-// scaffolded project by stripping unused infrastructure based on user input.
-// Source files use comment markers (e.g. "# [tag]" / "# [/tag]") to delimit
-// feature-specific blocks that can be cleanly removed.
+// Setup configures a freshly scaffolded project by removing the features it
+// does not need, then deletes itself.
 //
-// Run with: go run ./cmd/setup
+// Without -y, an interactive form asks which features to keep, starting from
+// the flag values. With -y, the flags alone decide:
+//
+//	go run ./cmd/setup
+//	go run ./cmd/setup -y -server=false -packages=worker,retry
+//	make setup ARGS="-y -postgres-hosting=external"
+//
+// The flags are:
+//
+//	-y                 apply without prompting
+//	-server            keep the HTTP server (default true)
+//	-client            keep the HTTP client (default true)
+//	-docker            keep the Docker files (default true)
+//	-postgres          keep PostgreSQL support (default true)
+//	-postgres-hosting  PostgreSQL hosting: docker or external (default docker)
+//	-packages          comma-separated names of optional packages to keep:
+//	                   worker, retry, state, cycle, fake, ptr (default all)
+//
+// At least one of the server or the client must be kept.
+//
+// Project files mark feature-specific code with comments. A block runs from
+// a full-line "# [tag]" or "// [tag]" to the matching "[/tag]", and blocks
+// may nest. A trailing comment made only of tags, as in
+// `"net/http" // [server]`, marks a single line, which is removed when any of
+// its tags is. After removing the sections of disabled features, setup strips
+// the remaining markers and runs go mod tidy and go fmt.
 package main
 
 import (
 	"errors"
+	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"slices"
-
-	"github.com/charmbracelet/huh"
+	"strings"
 )
 
+// errUserAborted reports that the user quit the form without answering.
 var errUserAborted = errors.New("user aborted")
-
-// setup holds the user's configuration choices collected from the form.
-type setup struct {
-	server    bool
-	client    bool
-	docker    bool
-	postgres  bool
-	pgHosting hosting
-	packages  []int
-	confirm   bool
-}
 
 func main() {
 	if err := run(); err != nil {
@@ -39,146 +53,136 @@ func main() {
 	}
 }
 
+// run collects the configuration from flags or the form and applies it.
 func run() error {
-	s := setup{
-		server:   true,
-		client:   true,
-		docker:   true,
-		postgres: true,
-		confirm:  true,
-	}
-
-	err := huh.NewForm(
-		huh.NewGroup(
-			huh.NewSelect[bool]().
-				Title("Include HTTP Server?").
-				Description("Chi router, middleware, graceful shutdown, JSON handlers").
-				Options(
-					huh.NewOption("Yes", true).Selected(true),
-					huh.NewOption("No", false),
-				).
-				Value(&s.server),
-
-			huh.NewSelect[bool]().
-				Title("Include HTTP Client?").
-				Description("TLS fingerprint, proxy rotation, HTTP/2, scraper entry point").
-				Options(
-					huh.NewOption("Yes", true).Selected(true),
-					huh.NewOption("No", false),
-				).
-				Value(&s.client),
-		),
-
-		huh.NewGroup(
-			huh.NewSelect[bool]().
-				Title("Include Docker?").
-				Description("Multi-stage Dockerfile, compose for dev, hot reload").
-				Options(
-					huh.NewOption("Yes", true).Selected(true),
-					huh.NewOption("No", false),
-				).
-				Value(&s.docker),
-
-			huh.NewSelect[bool]().
-				Title("Include PostgreSQL?").
-				Description("pgx pool, sqlc queries, goose migrations").
-				Options(
-					huh.NewOption("Yes", true).Selected(true),
-					huh.NewOption("No", false),
-				).
-				Value(&s.postgres),
-		),
-
-		huh.NewGroup(
-			huh.NewSelect[hosting]().
-				Title("PostgreSQL hosting").
-				Options(
-					huh.NewOption("Docker", hostingDocker).Selected(true),
-					huh.NewOption("External", hostingExternal),
-				).
-				Value(&s.pgHosting),
-		).WithHideFunc(func() bool {
-			return !s.postgres || !s.docker
-		}),
-
-		huh.NewGroup(
-			packageSelect(&s.packages),
-		),
-
-		huh.NewGroup(
-			huh.NewSelect[bool]().
-				Title("Apply changes?").
-				Options(
-					huh.NewOption("Apply", true).Selected(true),
-					huh.NewOption("Cancel", false),
-				).
-				Value(&s.confirm),
-		),
-	).WithTheme(theme()).Run()
+	c, yes, err := parseFlags(os.Args[1:])
 	if err != nil {
-		if errors.Is(err, huh.ErrUserAborted) {
-			return errUserAborted
-		}
-
 		return err
 	}
 
-	if !s.confirm {
-		fmt.Println("setup cancelled")
+	if !yes {
+		confirmed, err := runForm(&c)
+		if err != nil {
+			return err
+		}
 
-		return nil
+		if !confirmed {
+			fmt.Println("setup cancelled")
+
+			return nil
+		}
 	}
 
-	apply(s)
+	if err := c.validate(); err != nil {
+		return err
+	}
+
+	return apply(c)
+}
+
+// parseFlags parses the command line into the initial configuration and
+// reports whether -y was given, in which case the configuration is final.
+// Invalid flags print usage and exit the process.
+func parseFlags(args []string) (c config, yes bool, err error) {
+	c.packages = packageNames()
+
+	flags := flag.NewFlagSet("setup", flag.ExitOnError)
+	flags.BoolVar(&yes, "y", false, "apply without prompting")
+	flags.BoolVar(&c.server, "server", true, "keep the HTTP server")
+	flags.BoolVar(&c.client, "client", true, "keep the HTTP client")
+	flags.BoolVar(&c.docker, "docker", true, "keep the Docker files")
+	flags.BoolVar(&c.postgres, "postgres", true, "keep PostgreSQL support")
+	flags.TextVar(&c.pgHosting, "postgres-hosting", hostingDocker, "PostgreSQL `hosting`: docker or external")
+
+	// The backquoted word names the flag's argument in the usage message.
+	packagesUsage := fmt.Sprintf("comma-separated `names` of optional packages to keep: %s (default all)", strings.Join(packageNames(), ","))
+	flags.Func("packages", packagesUsage, func(list string) error {
+		names, err := parsePackages(list)
+		if err != nil {
+			return err
+		}
+
+		c.packages = names
+
+		return nil
+	})
+
+	if err := flags.Parse(args); err != nil {
+		return config{}, false, err
+	}
+
+	if flags.NArg() > 0 {
+		return config{}, false, fmt.Errorf("unexpected argument %q", flags.Arg(0))
+	}
+
+	return c, yes, nil
+}
+
+// parsePackages splits a comma-separated list of optional package names. It
+// rejects names missing from optionalPackages. An empty list keeps none.
+func parsePackages(list string) ([]string, error) {
+	known := packageNames()
+
+	var names []string
+	for name := range strings.SplitSeq(list, ",") {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+
+		if !slices.Contains(known, name) {
+			return nil, fmt.Errorf("unknown package %q, want any of %s", name, strings.Join(known, ","))
+		}
+
+		names = append(names, name)
+	}
+
+	return names, nil
+}
+
+// apply removes everything c disables, strips the remaining markers, deletes
+// the setup command, and tidies the module. Malformed markers abort before
+// anything changes. A failed file or directory change does not stop the
+// remaining steps but makes apply return an error. Failures of go mod tidy
+// and go fmt are only warnings.
+func apply(c config) error {
+	removal := c.removal()
+
+	files, err := loadMarkedFiles(markedFiles)
+	if err != nil {
+		return err
+	}
+
+	// Rewrite before removing paths so that a marked file being deleted,
+	// such as compose.yaml, is not recreated.
+	changeErr := errors.Join(
+		rewriteFiles(files, removal.tags),
+		removePaths(removal.paths),
+	)
+
+	warn(runGo("mod", "tidy"))
+	warn(runGo("fmt", "./..."))
+
+	if changeErr != nil {
+		return fmt.Errorf("setup incomplete: %w", changeErr)
+	}
+
+	fmt.Println("\nsetup complete")
 
 	return nil
 }
 
-// packageSelect builds a multi-select field from the optionalPackages registry.
-// All packages are pre-selected (batteries-included default).
-func packageSelect(value *[]int) *huh.MultiSelect[int] {
-	opts := make([]huh.Option[int], len(optionalPackages))
-	for i, p := range optionalPackages {
-		opts[i] = huh.NewOption(p.label, i).Selected(true)
+// runGo runs the go command with args, streaming its output.
+func runGo(args ...string) error {
+	cmd := exec.Command("go", args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("go %s: %w", strings.Join(args, " "), err)
 	}
 
-	return huh.NewMultiSelect[int]().
-		Title("Packages to include").
-		Description("Pre-selected. Deselect any you don't need.").
-		Options(opts...).
-		Value(value)
-}
-
-// apply removes disabled features and cleans up the project.
-func apply(s setup) {
-	if !s.server {
-		warn(removeFeature(serverRemoval))
-	}
-
-	if !s.client {
-		warn(removeFeature(clientRemoval))
-	}
-
-	if !s.docker {
-		warn(removeFeature(dockerRemoval))
-	}
-
-	if !s.postgres {
-		warn(removeFeature(postgresRemoval))
-	} else if !s.docker || s.pgHosting == hostingExternal {
-		warn(removeFeature(postgresExternalRemoval))
-	}
-
-	for i, p := range optionalPackages {
-		if !slices.Contains(s.packages, i) {
-			warn(removeFeature(p.feature))
-		}
-	}
-
-	warn(removeSelf())
-	warn(tidyModules())
-
-	fmt.Println("\nsetup complete")
+	return nil
 }
 
 // warn prints a non-fatal error to stderr.

@@ -1,61 +1,48 @@
 // Package fake provides random data generation for testing and development.
+// Its functions are safe for concurrent use.
 package fake
 
 import (
 	"fmt"
 	"math/rand/v2"
 	"strings"
-	"sync"
+	"unicode/utf8"
 )
 
-// Generator creates fake data for testing and development.
-type Generator struct {
-	mu sync.Mutex
+// FirstName returns a random first name.
+func FirstName() string {
+	return pick(firstNames)
 }
 
-// New creates a Generator.
-func New() *Generator {
-	return &Generator{}
+// LastName returns a random last name.
+func LastName() string {
+	return pick(lastNames)
 }
 
-// FirstName generates a random first name.
-func (g *Generator) FirstName() string {
-	return g.randomFrom(firstNames)
+// Email returns a random email address such as "mary.smith4821@gmail.com".
+func Email() string {
+	return strings.ToLower(fmt.Sprintf("%s.%s%d@%s", FirstName(), LastName(), between(1000, 10000), pick(emailDomains)))
 }
 
-// LastName generates a random last name.
-func (g *Generator) LastName() string {
-	return g.randomFrom(lastNames)
-}
-
-// Email generates a random email address.
-func (g *Generator) Email() string {
-	return g.email(g.FirstName(), g.LastName(), g.randomFrom(emailDomains))
-}
-
-// StudentEmail generates an email address using the given first and last name
-// with the provided .edu domain (e.g., johnd42@ucr.edu).
-func (g *Generator) StudentEmail(firstName, lastName, domain string) string {
-	first := strings.ToLower(firstName)
-	last := strings.ToLower(lastName)
-	if len(last) == 0 {
-		last = "x"
+// StudentEmail returns an email address built from a first name, the
+// initial of a last name, and a number at domain, such as
+// "johnd42@example.edu".
+func StudentEmail(firstName, lastName, domain string) string {
+	initial := "x"
+	if lastName != "" {
+		_, size := utf8.DecodeRuneInString(lastName)
+		initial = lastName[:size]
 	}
-	return fmt.Sprintf("%s%s%d@%s", first, last[:1], g.randomInt(10, 100), domain)
+
+	return strings.ToLower(fmt.Sprintf("%s%s%d@%s", firstName, initial, between(10, 100), domain))
 }
 
-func (g *Generator) email(firstName, lastName, domain string) string {
-	return fmt.Sprintf("%s.%s%d@%s", firstName, lastName, g.randomInt(1000, 9999), domain)
+// pick returns a random element of values, which must not be empty.
+func pick(values []string) string {
+	return values[rand.IntN(len(values))]
 }
 
-func (g *Generator) randomFrom(slice []string) string {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	return slice[rand.IntN(len(slice))]
-}
-
-func (g *Generator) randomInt(lo, hi int) int {
-	g.mu.Lock()
-	defer g.mu.Unlock()
+// between returns a random integer in [lo, hi).
+func between(lo, hi int) int {
 	return lo + rand.IntN(hi-lo)
 }

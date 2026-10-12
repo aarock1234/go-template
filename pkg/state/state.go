@@ -1,48 +1,66 @@
 // Package state provides generic, file-backed JSON state persistence with
-// cross-platform file locking.
+// cross-process locking and crash-safe saves.
 package state
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
-	"io"
+	"io/fs"
 	"os"
+	"path/filepath"
+	"sync"
 )
 
-// File manages a JSON file that persists state of type T across restarts.
-// It holds an exclusive lock on the file for its entire lifetime to prevent
-// concurrent access from multiple process instances.
+// File persists state of type T as JSON at a path.
+//
+// While open, a File holds an exclusive lock on the companion file
+// "<path>.lock", so only one process uses the state at a time. Save writes
+// the new state to a temporary file, flushes it to disk, and renames it over
+// the state file, so a failed or interrupted save leaves the previous state
+// intact. The rename is atomic on POSIX filesystems and a best-effort
+// replacement on Windows. Methods are safe for concurrent use.
 type File[T any] struct {
-	f *os.File
+	mu   sync.Mutex
+	path string
+	lock *os.File
 }
 
-// Open creates or opens the file at path, acquires a non-blocking exclusive
-// lock, and returns a handle for loading and saving state. If another process
-// holds the lock, an error is returned immediately. Call Close to release.
+// Open acquires a non-blocking exclusive lock for the state at path and
+// returns a handle for loading and saving it. If another process holds the
+// lock, Open returns an error immediately. Call Close to release the lock;
+// the lock file itself is left in place.
 func Open[T any](path string) (*File[T], error) {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0644)
+	lock, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
-		return nil, fmt.Errorf("opening state file: %w", err)
+		return nil, fmt.Errorf("open state lock: %w", err)
 	}
 
-	if err := lockFile(f); err != nil {
-		_ = f.Close()
-		return nil, fmt.Errorf("acquiring state file lock: %w", err)
+	if err := lockFile(lock); err != nil {
+		_ = lock.Close()
+
+		return nil, fmt.Errorf("acquire state lock: %w", err)
 	}
 
-	return &File[T]{f: f}, nil
+	return &File[T]{
+		path: path,
+		lock: lock,
+	}, nil
 }
 
-// Load reads and unmarshals the persisted state from disk. Returns
-// (nil, nil) if the file is empty (first run).
+// Load reads the persisted state. It returns (nil, nil) when no state has
+// been saved yet.
 func (f *File[T]) Load() (*T, error) {
-	if _, err := f.f.Seek(0, io.SeekStart); err != nil {
-		return nil, fmt.Errorf("seeking state file: %w", err)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	data, err := os.ReadFile(f.path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
 	}
 
-	data, err := io.ReadAll(f.f)
 	if err != nil {
-		return nil, fmt.Errorf("reading state file: %w", err)
+		return nil, fmt.Errorf("read state file: %w", err)
 	}
 
 	if len(data) == 0 {
@@ -51,37 +69,70 @@ func (f *File[T]) Load() (*T, error) {
 
 	var v T
 	if err := json.Unmarshal(data, &v); err != nil {
-		return nil, fmt.Errorf("decoding state file: %w", err)
+		return nil, fmt.Errorf("decode state file: %w", err)
 	}
 
 	return &v, nil
 }
 
-// Save marshals the state, truncates the file, writes the new content,
-// and flushes to disk.
-func (f *File[T]) Save(v *T) error {
+// Save replaces the persisted state with v. It returns only after the new
+// state is flushed to disk.
+func (f *File[T]) Save(v T) error {
 	data, err := json.Marshal(v)
 	if err != nil {
-		return fmt.Errorf("encoding state: %w", err)
+		return fmt.Errorf("encode state: %w", err)
 	}
 
-	if err := f.f.Truncate(0); err != nil {
-		return fmt.Errorf("truncating state file: %w", err)
-	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
 
-	if _, err := f.f.Seek(0, io.SeekStart); err != nil {
-		return fmt.Errorf("seeking state file: %w", err)
-	}
-
-	if _, err := f.f.Write(data); err != nil {
-		return fmt.Errorf("writing state file: %w", err)
-	}
-
-	return f.f.Sync()
+	return replaceFile(f.path, data)
 }
 
-// Close releases the exclusive lock and closes the file.
+// Close releases the lock. The File must not be used afterward.
 func (f *File[T]) Close() error {
-	_ = unlockFile(f.f)
-	return f.f.Close()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	return errors.Join(unlockFile(f.lock), f.lock.Close())
+}
+
+// replaceFile writes data to a temporary file beside path, flushes it, and
+// renames it over path. The temporary file is removed if any step fails.
+func replaceFile(path string, data []byte) (err error) {
+	dir := filepath.Dir(path)
+
+	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return fmt.Errorf("create temporary state file: %w", err)
+	}
+
+	defer func() {
+		if err != nil {
+			_ = tmp.Close()
+			_ = os.Remove(tmp.Name())
+		}
+	}()
+
+	if _, err := tmp.Write(data); err != nil {
+		return fmt.Errorf("write temporary state file: %w", err)
+	}
+
+	if err := tmp.Sync(); err != nil {
+		return fmt.Errorf("sync temporary state file: %w", err)
+	}
+
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close temporary state file: %w", err)
+	}
+
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		return fmt.Errorf("replace state file: %w", err)
+	}
+
+	if err := syncDir(dir); err != nil {
+		return fmt.Errorf("sync state directory: %w", err)
+	}
+
+	return nil
 }

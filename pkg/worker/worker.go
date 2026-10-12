@@ -1,105 +1,158 @@
 // Package worker provides generic bounded-concurrency primitives for
-// processing slices of items in parallel with context cancellation.
+// processing items in parallel with context cancellation.
+//
+// Every function runs at most concurrency calls of fn at a time, stops
+// starting new calls after the first failure or after ctx is canceled, and
+// waits for every started call before returning. It returns the first error
+// from fn, or ctx's error if ctx was canceled before all items were
+// processed. fn must observe its context to stop early.
 package worker
 
 import (
 	"context"
+	"errors"
 	"iter"
+	"slices"
 	"sync"
 
 	"golang.org/x/sync/errgroup"
 )
 
-// Run processes items concurrently with at most concurrency goroutines.
-// It returns the first error encountered, cancelling remaining work.
-func Run[T any](ctx context.Context, items []T, concurrency int, fn func(ctx context.Context, item T) error) error {
-	g, ctx := errgroup.WithContext(ctx)
-	g.SetLimit(concurrency)
+// ErrInvalidConcurrency is returned when concurrency is less than one.
+var ErrInvalidConcurrency = errors.New("concurrency must be at least 1")
 
-	for _, item := range items {
-		g.Go(func() error {
-			return fn(ctx, item)
-		})
-	}
-
-	return g.Wait()
+// Run calls fn for each item.
+func Run[T any](
+	ctx context.Context,
+	items []T,
+	concurrency int,
+	fn func(context.Context, T) error,
+) error {
+	return RunIter(ctx, slices.Values(items), concurrency, fn)
 }
 
-// Map processes items concurrently with at most concurrency goroutines and
-// collects results in input order. It returns the first error encountered,
-// cancelling remaining work. On success the returned slice has the same
-// length and order as items.
-func Map[T, R any](ctx context.Context, items []T, concurrency int, fn func(ctx context.Context, item T) (R, error)) ([]R, error) {
-	g, ctx := errgroup.WithContext(ctx)
-	g.SetLimit(concurrency)
-
+// Map calls fn for each item and returns the results in input order. On
+// error it returns a nil slice.
+func Map[T, R any](
+	ctx context.Context,
+	items []T,
+	concurrency int,
+	fn func(context.Context, T) (R, error),
+) ([]R, error) {
 	results := make([]R, len(items))
 
-	for i, item := range items {
-		g.Go(func() error {
-			r, err := fn(ctx, item)
-			if err != nil {
-				return err
-			}
-			results[i] = r
+	err := RunIter(ctx, enumerate(slices.Values(items)), concurrency, func(ctx context.Context, item indexedItem[T]) error {
+		result, err := fn(ctx, item.value)
+		if err != nil {
+			return err
+		}
 
-			return nil
-		})
-	}
+		results[item.index] = result
 
-	if err := g.Wait(); err != nil {
+		return nil
+	})
+	if err != nil {
 		return nil, err
 	}
 
 	return results, nil
 }
 
-// RunIter processes items from an iterator concurrently with at most
-// concurrency goroutines. It returns the first error encountered,
-// cancelling remaining work.
-func RunIter[T any](ctx context.Context, seq iter.Seq[T], concurrency int, fn func(ctx context.Context, item T) error) error {
-	g, ctx := errgroup.WithContext(ctx)
-	g.SetLimit(concurrency)
+// RunIter calls fn for each item from seq. It stops pulling from seq after
+// the first failure or cancellation.
+func RunIter[T any](
+	ctx context.Context,
+	seq iter.Seq[T],
+	concurrency int,
+	fn func(context.Context, T) error,
+) error {
+	if concurrency < 1 {
+		return ErrInvalidConcurrency
+	}
+
+	group, groupCtx := errgroup.WithContext(ctx)
+	group.SetLimit(concurrency)
 
 	for item := range seq {
-		g.Go(func() error {
-			return fn(ctx, item)
+		if groupCtx.Err() != nil {
+			break
+		}
+
+		group.Go(func() error {
+			if err := groupCtx.Err(); err != nil {
+				return err
+			}
+
+			return fn(groupCtx, item)
 		})
 	}
 
-	return g.Wait()
+	if err := group.Wait(); err != nil {
+		return err
+	}
+
+	return ctx.Err()
 }
 
-// MapIter processes items from an iterator concurrently with at most
-// concurrency goroutines and collects results. Unlike Map, input order
-// is not guaranteed because iterator length is unknown upfront.
-func MapIter[T, R any](ctx context.Context, seq iter.Seq[T], concurrency int, fn func(ctx context.Context, item T) (R, error)) ([]R, error) {
-	g, ctx := errgroup.WithContext(ctx)
-	g.SetLimit(concurrency)
-
+// MapIter calls fn for each item from seq and returns the results in the
+// order seq produced the items. On error it returns a nil slice.
+func MapIter[T, R any](
+	ctx context.Context,
+	seq iter.Seq[T],
+	concurrency int,
+	fn func(context.Context, T) (R, error),
+) ([]R, error) {
 	var (
 		mu      sync.Mutex
 		results []R
 	)
 
-	for item := range seq {
-		g.Go(func() error {
-			r, err := fn(ctx, item)
-			if err != nil {
-				return err
-			}
+	err := RunIter(ctx, enumerate(seq), concurrency, func(ctx context.Context, item indexedItem[T]) error {
+		result, err := fn(ctx, item.value)
+		if err != nil {
+			return err
+		}
 
-			mu.Lock()
-			results = append(results, r)
-			mu.Unlock()
+		mu.Lock()
+		defer mu.Unlock()
 
-			return nil
-		})
-	}
+		if item.index >= len(results) {
+			results = append(results, make([]R, item.index+1-len(results))...)
+		}
 
-	if err := g.Wait(); err != nil {
+		results[item.index] = result
+
+		return nil
+	})
+	if err != nil {
 		return nil, err
 	}
 
 	return results, nil
+}
+
+// indexedItem pairs an item with its position in the input.
+type indexedItem[T any] struct {
+	index int
+	value T
+}
+
+// enumerate yields the items of seq with their positions.
+func enumerate[T any](seq iter.Seq[T]) iter.Seq[indexedItem[T]] {
+	return func(yield func(indexedItem[T]) bool) {
+		index := 0
+
+		for item := range seq {
+			next := indexedItem[T]{
+				index: index,
+				value: item,
+			}
+
+			if !yield(next) {
+				return
+			}
+
+			index++
+		}
+	}
 }
