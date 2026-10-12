@@ -30,11 +30,13 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"slices"
 	"strings"
 )
@@ -77,7 +79,10 @@ func run() error {
 		return err
 	}
 
-	return apply(c)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+
+	return apply(ctx, c)
 }
 
 // parseFlags parses the command line into the initial configuration and
@@ -145,7 +150,7 @@ func parsePackages(list string) ([]string, error) {
 // anything changes. A failed file or directory change does not stop the
 // remaining steps but makes apply return an error. Failures of go mod tidy
 // and go fmt are only warnings.
-func apply(c config) error {
+func apply(ctx context.Context, c config) error {
 	removal := c.removal()
 
 	files, err := loadMarkedFiles(markedFiles)
@@ -160,8 +165,8 @@ func apply(c config) error {
 		removePaths(removal.paths),
 	)
 
-	warn(runGo("mod", "tidy"))
-	warn(runGo("fmt", "./..."))
+	warn(runGo(ctx, "mod", "tidy"))
+	warn(runGo(ctx, "fmt", "./..."))
 
 	if changeErr != nil {
 		return fmt.Errorf("setup incomplete: %w", changeErr)
@@ -172,9 +177,10 @@ func apply(c config) error {
 	return nil
 }
 
-// runGo runs the go command with args, streaming its output.
-func runGo(args ...string) error {
-	cmd := exec.Command("go", args...)
+// runGo runs the go command with args, streaming its output. Canceling ctx
+// stops the command.
+func runGo(ctx context.Context, args ...string) error {
+	cmd := exec.CommandContext(ctx, "go", args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
