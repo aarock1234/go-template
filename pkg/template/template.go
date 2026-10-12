@@ -1,22 +1,23 @@
-// Package template is a skeleton service that demonstrates how to wire an HTTP
-// client and database together. Replace it with your own domain logic.
+// Package template is a skeleton service that demonstrates how to use the
+// fingerprinted HTTP client against a JSON API. Replace it with your own
+// domain logic.
 package template
 
 import (
 	"fmt"
 
 	"github.com/aarock1234/go-template/pkg/client"
-	"github.com/aarock1234/go-template/pkg/db"
 )
 
-// Service orchestrates HTTP requests and database access for a single domain.
+// Service fetches the network fingerprints that tls.but.sh observes for
+// its client.
 type Service struct {
-	db     *db.DB
 	client *client.Client
 }
 
-// New creates a Service with an HTTP client configured for the given proxy.
-func New(db *db.DB, proxy *client.Proxy) (*Service, error) {
+// New creates a Service. Requests are routed through proxy when it is
+// non-nil.
+func New(proxy *client.Proxy) (*Service, error) {
 	var opts []client.Option
 	if proxy != nil {
 		opts = append(opts, client.WithProxy(proxy))
@@ -28,7 +29,11 @@ func New(db *db.DB, proxy *client.Proxy) (*Service, error) {
 	}
 
 	return &Service{
-		db:     db,
 		client: c,
 	}, nil
+}
+
+// Close releases the idle connections held by the service's client.
+func (s *Service) Close() {
+	s.client.Close()
 }

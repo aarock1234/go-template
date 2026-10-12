@@ -5,6 +5,7 @@
 *.dylib
 *.test
 *.out
+bin/
 
 # Environment
 .env
@@ -13,6 +14,7 @@
 
 # Docker
 Dockerfile
+compose.yaml
 docker-compose*.yml
 .dockerignore
 
@@ -36,5 +38,5 @@ LICENSE
 
 # CI / tooling
 .github/
-.llm/
+.agents/
 node_modules/

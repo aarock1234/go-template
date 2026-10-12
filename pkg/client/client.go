@@ -1,50 +1,76 @@
-// Package client provides an HTTP client with TLS fingerprinting, HTTP/2
-// fingerprint control, custom cookie handling, and proxy support.
+// Package client provides an HTTP client with browser TLS and HTTP/2
+// fingerprints, browser identity headers, a cookie jar that captures cookies
+// across redirects, and proxy support.
 package client
 
 import (
 	"crypto/tls"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/url"
+	"slices"
 	"strings"
 
 	http "github.com/aarock1234/fphttp"
 	utls "github.com/refraction-networking/utls"
 )
 
+// maxRedirects is the number of redirects Do follows before giving up.
 const maxRedirects = 10
 
 // ErrTooManyRedirects is returned when a request exceeds the maximum number
 // of allowed redirects.
 var ErrTooManyRedirects = errors.New("too many redirects")
 
-// Client is an HTTP client with TLS fingerprinting, HTTP/2 fingerprint
-// control, custom cookie handling, and proxy support.
+// sensitiveHeaders are dropped when a redirect leaves the current host and
+// its subdomains.
+var sensitiveHeaders = []string{
+	"Authorization",
+	"Proxy-Authorization",
+	"Www-Authenticate",
+	"Cookie2",
+}
+
+// bodyHeaders describe a request body and are dropped when a redirect
+// switches to a body-less request.
+var bodyHeaders = []string{
+	"Content-Encoding",
+	"Content-Language",
+	"Content-Length",
+	"Content-Location",
+	"Content-Type",
+}
+
+// Client is an HTTP client that presents a browser's TLS fingerprint,
+// HTTP/2 settings, header order, and identity headers. It is safe for
+// concurrent use by multiple goroutines.
 type Client struct {
-	http                   *http.Client
-	jar                    *CookieJar
-	extractCookies         CookieExtractor
-	proxy                  *Proxy
-	browser                Browser
+	http           *http.Client
+	jar            *CookieJar
+	defaultHeaders http.Header
+
+	browser                http.Browser
+	platform               http.Platform
 	browserVersion         string
-	platform               Platform
+	fingerprint            *http.Fingerprint
 	clientHelloID          *utls.ClientHelloID
+	proxy                  *Proxy
+	extractCookies         CookieExtractor
 	defaultHeaderOverrides http.Header
 	disableDecompression   bool
 	insecureSkipVerify     bool
-	defaultHeaders         http.Header
 }
 
-// New creates a new Client with the given options. Defaults to Chrome on
-// Windows with TLS verification enabled.
+// New creates a Client with the given options. By default it presents
+// Chrome on Windows and verifies TLS certificates. It returns an error for a
+// browser and platform combination without a fingerprint profile or
+// identity headers.
 func New(opts ...Option) (*Client, error) {
 	c := &Client{
-		browser:        BrowserChrome,
-		browserVersion: defaultBrowserVersion,
-		platform:       PlatformWindows,
+		jar:            &CookieJar{},
+		browser:        http.BrowserChrome,
+		platform:       http.PlatformWindows,
 		extractCookies: DefaultCookieExtractor,
 	}
 
@@ -52,38 +78,30 @@ func New(opts ...Option) (*Client, error) {
 		opt(c)
 	}
 
-	fp := resolveFingerprint(c.browser, c.platform)
-
-	if c.clientHelloID != nil {
-		fp.ClientHelloID = *c.clientHelloID
+	fingerprint, err := c.resolveFingerprint()
+	if err != nil {
+		return nil, err
 	}
 
-	c.defaultHeaders = resolveDefaultHeaders(c.browser, c.browserVersion, c.platform)
-
-	if c.defaultHeaderOverrides != nil {
-		for key, values := range c.defaultHeaderOverrides {
-			c.defaultHeaders.Del(key)
-			if len(values) == 0 || values[0] == "" {
-				continue
-			}
-
-			c.defaultHeaders.Set(key, values[0])
-		}
+	if c.browserVersion == "" {
+		c.browserVersion = defaultVersion(c.browser, c.platform)
 	}
 
-	transport := &http.Transport{
-		Fingerprint:     fp,
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: c.insecureSkipVerify},
+	headers, err := identityHeaders(c.browser, c.platform, c.browserVersion)
+	if err != nil {
+		return nil, err
 	}
 
-	if c.proxy != nil {
-		transport.Proxy = http.ProxyURL(c.proxy.URL())
+	c.defaultHeaders = mergeHeaders(headers, c.defaultHeaderOverrides)
+
+	transport, err := c.newTransport(fingerprint)
+	if err != nil {
+		return nil, err
 	}
 
-	c.jar = newCookieJar()
 	c.http = &http.Client{
 		Transport: transport,
-		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+		CheckRedirect: func(*http.Request, []*http.Request) error {
 			return http.ErrUseLastResponse
 		},
 	}
@@ -91,104 +109,135 @@ func New(opts ...Option) (*Client, error) {
 	return c, nil
 }
 
-// Do sends an HTTP request and returns an HTTP response. Redirects are
-// followed manually so that Set-Cookie headers from intermediate responses
-// are captured and applied to subsequent requests.
-func (c *Client) Do(req *http.Request) (*http.Response, error) {
-	for range maxRedirects {
-		c.applyDefaultHeaders(req)
-		c.setRequestCookies(req)
+// resolveFingerprint returns a private copy of the configured fingerprint,
+// or of the fphttp profile for the browser and platform.
+func (c *Client) resolveFingerprint() (*http.Fingerprint, error) {
+	fingerprint := c.fingerprint
+	if fingerprint == nil {
+		fingerprint = http.Profile(c.browser, c.platform)
+	}
 
-		resp, err := c.doRoundTrip(req)
+	if fingerprint == nil {
+		return nil, fmt.Errorf("no fingerprint profile for %s on %s", c.browser, c.platform)
+	}
+
+	fingerprint = fingerprint.Clone()
+
+	if c.clientHelloID != nil {
+		fingerprint.ClientHelloID = *c.clientHelloID
+	}
+
+	if err := fingerprint.Validate(); err != nil {
+		return nil, fmt.Errorf("validate fingerprint: %w", err)
+	}
+
+	return fingerprint, nil
+}
+
+// newTransport clones fphttp's default transport, which carries its dial,
+// TLS handshake, and idle connection timeouts, and applies the client's
+// fingerprint, TLS, and proxy settings.
+func (c *Client) newTransport(fingerprint *http.Fingerprint) (*http.Transport, error) {
+	base, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		return nil, fmt.Errorf("default transport is %T, want *http.Transport", http.DefaultTransport)
+	}
+
+	transport := base.Clone()
+	transport.Fingerprint = fingerprint
+
+	if c.insecureSkipVerify {
+		transport.TLSClientConfig = &tls.Config{
+			InsecureSkipVerify: true, //nolint:gosec // explicitly requested with WithInsecureSkipVerify
+		}
+	}
+
+	if c.proxy != nil {
+		transport.Proxy = http.ProxyURL(c.proxy.URL())
+	}
+
+	return transport, nil
+}
+
+// Do sends req and returns the final response. Redirects are followed
+// manually so cookies set by intermediate responses reach the jar. Default
+// headers fill in any header the request does not set; req itself is not
+// modified. When the error is nil, the caller must close the response body.
+func (c *Client) Do(req *http.Request) (*http.Response, error) {
+	req = req.Clone(req.Context())
+
+	for redirects := 0; ; redirects++ {
+		c.applyDefaultHeaders(req)
+		c.applyCookies(req)
+
+		resp, err := c.http.Do(req)
 		if err != nil {
 			return nil, err
 		}
 
-		if err := c.storeResponseCookies(resp); err != nil {
+		slog.DebugContext(req.Context(), "round trip complete",
+			slog.String("host", req.URL.Hostname()),
+			slog.Int("status", resp.StatusCode),
+		)
+
+		if err := c.storeCookies(resp); err != nil {
 			_ = resp.Body.Close()
 
 			return nil, err
 		}
 
-		if !c.disableDecompression && !resp.Uncompressed {
-			if err := decompressResponse(resp); err != nil {
-				slog.Warn("decompression failed", "error", err)
-			}
-		}
-
-		method, ok := shouldRedirect(resp)
+		method, ok := redirectMethod(req, resp)
 		if !ok {
+			if !c.disableDecompression {
+				decompress(resp)
+			}
+
 			return resp, nil
 		}
 
 		_ = resp.Body.Close()
 
-		next, err := redirectRequest(req, resp, method)
+		if redirects == maxRedirects {
+			return nil, ErrTooManyRedirects
+		}
+
+		req, err = redirectRequest(req, resp, method)
 		if err != nil {
 			return nil, err
 		}
-
-		req = next.WithContext(req.Context())
 	}
-
-	return nil, ErrTooManyRedirects
 }
 
-func (c *Client) doRoundTrip(req *http.Request) (*http.Response, error) {
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return nil, err
-	}
-
-	slog.Debug("round trip complete",
-		slog.String("host", req.URL.Hostname()),
-		slog.Int("status", resp.StatusCode),
-	)
-
-	return resp, nil
-}
-
+// applyDefaultHeaders sets each default header that req does not set.
 func (c *Client) applyDefaultHeaders(req *http.Request) {
 	for key, values := range c.defaultHeaders {
-		if req.Header.Get(key) == "" {
-			for _, v := range values {
-				req.Header.Set(key, v)
-			}
+		if _, ok := req.Header[key]; !ok {
+			req.Header[key] = slices.Clone(values)
 		}
 	}
 }
 
-func (c *Client) setRequestCookies(req *http.Request) {
-	if c.jar == nil {
-		return
-	}
-
+// applyCookies adds the jar's cookies for req's URL after any cookies the
+// request already carries.
+func (c *Client) applyCookies(req *http.Request) {
 	cookies := c.jar.Cookies(req.URL)
 	if len(cookies) == 0 {
 		return
 	}
 
-	var b strings.Builder
-	for i, cookie := range cookies {
-		if i > 0 {
-			b.WriteString("; ")
-		}
-		b.WriteString(cookie.Name)
-		b.WriteByte('=')
-		b.WriteString(cookie.Value)
+	header := cookieHeader(cookies)
+	if existing := req.Header.Get("Cookie"); existing != "" {
+		header = existing + "; " + header
 	}
 
-	req.Header.Set("Cookie", b.String())
+	req.Header.Set("Cookie", header)
 }
 
-func (c *Client) storeResponseCookies(resp *http.Response) error {
-	if c.jar == nil {
-		return nil
-	}
-
+// storeCookies saves the cookies set by resp in the jar.
+func (c *Client) storeCookies(resp *http.Response) error {
 	cookies, err := c.extractCookies(resp)
 	if err != nil {
-		return fmt.Errorf("extracting cookies: %w", err)
+		return fmt.Errorf("extract cookies: %w", err)
 	}
 
 	c.jar.SetCookies(resp.Request.URL, cookies)
@@ -196,119 +245,134 @@ func (c *Client) storeResponseCookies(resp *http.Response) error {
 	return nil
 }
 
-// shouldRedirect returns (method, true) if the response is a redirect that
-// should be followed, or ("", false) otherwise.
-func shouldRedirect(resp *http.Response) (method string, ok bool) {
+// redirectMethod returns the method for following resp, or false when resp
+// is not a redirect that can be followed. Like net/http, 301, 302, and 303
+// switch to GET (HEAD stays HEAD), while 307 and 308 keep the method and
+// body and are not followed when the body cannot be replayed.
+func redirectMethod(req *http.Request, resp *http.Response) (string, bool) {
+	if resp.Header.Get("Location") == "" {
+		return "", false
+	}
+
 	switch resp.StatusCode {
 	case http.StatusMovedPermanently, http.StatusFound, http.StatusSeeOther:
+		if req.Method == http.MethodHead {
+			return http.MethodHead, true
+		}
+
 		return http.MethodGet, true
 	case http.StatusTemporaryRedirect, http.StatusPermanentRedirect:
-		return resp.Request.Method, true
+		if req.GetBody == nil && req.Body != nil && req.Body != http.NoBody {
+			return "", false
+		}
+
+		return req.Method, true
 	default:
 		return "", false
 	}
 }
 
-func redirectRequest(origin *http.Request, resp *http.Response, method string) (*http.Request, error) {
+// redirectRequest builds the request that follows resp with method. It
+// starts from a clone of req, so fphttp's per-request header order and
+// priority overrides carry over, and drops headers that must not follow
+// the redirect.
+func redirectRequest(req *http.Request, resp *http.Response, method string) (*http.Request, error) {
 	location, err := resp.Location()
 	if err != nil {
-		return nil, fmt.Errorf("getting redirect location: %w", err)
+		return nil, fmt.Errorf("parse redirect location: %w", err)
 	}
 
-	if location.Scheme == "" || location.Host == "" {
-		location = resp.Request.URL.ResolveReference(location)
+	next := req.Clone(req.Context())
+	next.Method = method
+	next.URL = location
+	next.Response = resp
+	next.Header.Del("Cookie")
+
+	if location.Host != req.URL.Host {
+		next.Host = ""
 	}
 
-	if method == "" {
-		method = http.MethodGet
+	if !sameOrSubdomain(location.Hostname(), req.URL.Hostname()) {
+		for _, name := range sensitiveHeaders {
+			next.Header.Del(name)
+		}
 	}
 
-	var body io.ReadCloser
-	if method == origin.Method && origin.Body != nil && origin.GetBody != nil {
-		var err error
-		body, err = origin.GetBody()
+	switch resp.StatusCode {
+	case http.StatusTemporaryRedirect, http.StatusPermanentRedirect:
+		if req.GetBody == nil {
+			break
+		}
+
+		body, err := req.GetBody()
 		if err != nil {
-			return nil, fmt.Errorf("getting request body for redirect: %w", err)
-		}
-	}
-
-	next, err := http.NewRequestWithContext(origin.Context(), method, location.String(), body)
-	if err != nil {
-		if body != nil {
-			_ = body.Close()
+			return nil, fmt.Errorf("replay request body: %w", err)
 		}
 
-		return nil, fmt.Errorf("creating redirect request: %w", err)
-	}
+		next.Body = body
+	default:
+		next.Body = nil
+		next.GetBody = nil
+		next.ContentLength = 0
+		next.TransferEncoding = nil
 
-	for k, v := range origin.Header {
-		if k != "Cookie" && k != "Host" {
-			next.Header[k] = v
+		for _, name := range bodyHeaders {
+			next.Header.Del(name)
 		}
 	}
 
 	return next, nil
 }
 
-// SetCookies stores cookies for the given URL in the client's jar.
-func (c *Client) SetCookies(u *url.URL, cookies []*http.Cookie) {
-	if c.jar == nil {
-		return
-	}
+// sameOrSubdomain reports whether host is parent or one of its subdomains.
+func sameOrSubdomain(host, parent string) bool {
+	host = strings.ToLower(host)
+	parent = strings.ToLower(parent)
 
+	return host == parent || strings.HasSuffix(host, "."+parent)
+}
+
+// SetCookies stores cookies in the jar as if u had set them.
+func (c *Client) SetCookies(u *url.URL, cookies []*http.Cookie) {
 	c.jar.SetCookies(u, cookies)
 }
 
-// SetCookieString sets cookies with a specific domain for subdomain sharing.
-// Domain should include leading dot (e.g., ".uber.com").
-// Optional exclude parameter allows filtering out specific cookie names.
-func (c *Client) SetCookieString(domain string, cookieString string, exclude ...string) error {
-	if c.jar == nil {
-		return nil
+// SetCookieString parses cookieString (see ParseCookies) and stores the
+// cookies for domain and its subdomains, skipping the names in exclude. A
+// leading "www." is removed from domain, so cookies set for
+// "www.example.com" are shared with every subdomain of "example.com".
+func (c *Client) SetCookieString(domain, cookieString string, exclude ...string) error {
+	cookies, err := ParseCookies(cookieString)
+	if err != nil {
+		return err
 	}
 
-	if cookieString == "" {
-		return nil
-	}
+	domain = strings.TrimPrefix(strings.TrimPrefix(domain, "."), "www.")
 
-	excludeSet := make(map[string]struct{}, len(exclude))
-	for _, name := range exclude {
-		excludeSet[name] = struct{}{}
-	}
+	kept := make([]*http.Cookie, 0, len(cookies))
 
-	cookies := ParseCookies(cookieString)
-
-	var filtered []*http.Cookie
 	for _, cookie := range cookies {
-		if _, ok := excludeSet[cookie.Name]; ok {
+		if slices.Contains(exclude, cookie.Name) {
 			continue
 		}
 
-		existingCookie, ok := c.FindCookie(cookie.Name, domain)
-		if ok && existingCookie.Value == cookie.Value {
-			continue
-		}
-
-		cookie.Domain = strings.TrimPrefix(domain, "www")
-		filtered = append(filtered, cookie)
+		cookie.Domain = domain
+		kept = append(kept, cookie)
 	}
 
 	c.jar.SetCookies(&url.URL{
 		Scheme: "https",
 		Host:   domain,
-	}, filtered)
+	}, kept)
 
 	return nil
 }
 
-// FindCookie returns the first cookie matching name for the given domain.
-func (c *Client) FindCookie(name string, domain string) (*http.Cookie, bool) {
-	if c.jar == nil {
-		return nil, false
-	}
-
-	for _, cookie := range c.GetCookies(domain) {
-		if strings.EqualFold(cookie.Name, name) {
+// FindCookie returns the cookie with the given name that would be sent to
+// domain.
+func (c *Client) FindCookie(name, domain string) (*http.Cookie, bool) {
+	for _, cookie := range c.Cookies(domain) {
+		if cookie.Name == name {
 			return cookie, true
 		}
 	}
@@ -316,8 +380,9 @@ func (c *Client) FindCookie(name string, domain string) (*http.Cookie, bool) {
 	return nil, false
 }
 
-// GetCookies returns cookies for the given domain.
-func (c *Client) GetCookies(domain string) []*http.Cookie {
+// Cookies returns copies of the cookies that would be sent to domain. A
+// leading-dot domain such as ".example.com" is looked up as its www host.
+func (c *Client) Cookies(domain string) []*http.Cookie {
 	if strings.HasPrefix(domain, ".") {
 		domain = "www" + domain
 	}
@@ -328,42 +393,34 @@ func (c *Client) GetCookies(domain string) []*http.Cookie {
 	})
 }
 
-// GetCookieString returns cookies for the given domain as a semicolon-separated string.
-func (c *Client) GetCookieString(domain string) string {
-	if c.jar == nil {
-		return ""
-	}
-
-	cookies := c.GetCookies(domain)
-	cookieStrings := make([]string, len(cookies))
-	for i, cookie := range cookies {
-		cookieStrings[i] = cookie.Name + "=" + cookie.Value
-	}
-
-	return strings.Join(cookieStrings, "; ")
+// CookieString returns the cookies that would be sent to domain in Cookie
+// header form ("name=value; name2=value2").
+func (c *Client) CookieString(domain string) string {
+	return cookieHeader(c.Cookies(domain))
 }
 
-// ClearCookies clears all cookies by creating a new jar.
+// ClearCookies removes every cookie from the jar.
 func (c *Client) ClearCookies() {
-	c.jar = newCookieJar()
+	c.jar.Clear()
 }
 
 // UserAgent returns the default User-Agent header.
 func (c *Client) UserAgent() string {
-	return c.defaultHeaders.Get("user-agent")
+	return c.defaultHeaders.Get("User-Agent")
 }
 
-// ClientHint returns the default sec-ch-ua header.
+// ClientHint returns the default Sec-Ch-Ua header, which is empty for
+// browsers that do not send client hints.
 func (c *Client) ClientHint() string {
-	return c.defaultHeaders.Get("sec-ch-ua")
+	return c.defaultHeaders.Get("Sec-Ch-Ua")
 }
 
-// Proxy returns the proxy configuration used by this client.
+// Proxy returns the proxy configuration used by this client, or nil.
 func (c *Client) Proxy() *Proxy {
 	return c.proxy
 }
 
-// Close closes idle connections. Safe to call multiple times.
+// Close closes idle connections. It is safe to call multiple times.
 func (c *Client) Close() {
 	c.http.CloseIdleConnections()
 }

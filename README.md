@@ -1,10 +1,10 @@
 # go-template
 
-![Go](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go&logoColor=white)
+![Go](https://img.shields.io/badge/Go-1.27-00ADD8?logo=go&logoColor=white)
 ![License](https://img.shields.io/badge/License-Elastic_2.0-blue)
 ![CI](https://github.com/aarock1234/go-template/actions/workflows/ci.yaml/badge.svg)
 
-An opinionated Go project template for scraper, bot, and service workloads. Batteries included: a TLS-fingerprinted HTTP client via [`fphttp`](https://github.com/aarock1234/fphttp), exponential backoff, bounded concurrency, file-backed state, PostgreSQL, and structured logging.
+An opinionated Go project template for scraper, bot, and service workloads. Batteries included: a TLS-fingerprinted HTTP client via [`fphttp`](https://github.com/aarock1234/fphttp), an HTTP server with graceful shutdown, exponential backoff, bounded concurrency, crash-safe file-backed state, PostgreSQL, and structured logging.
 
 ## Quick Start
 
@@ -14,27 +14,29 @@ Install [`gonew`](https://pkg.go.dev/golang.org/x/tools/cmd/gonew):
 go install golang.org/x/tools/cmd/gonew@latest
 ```
 
-Scaffold a new project:
+Scaffold a new project, which clones the template and rewrites all import paths to your module name:
 
 ```bash
 gonew github.com/aarock1234/go-template@latest github.com/you/myproject
 ```
 
-Clones the template and rewrites all import paths to your module name.
-
-After cloning, run the setup script to configure optional features:
+Then choose the features you need. Setup removes the rest, strips its markers, tidies modules, and deletes itself:
 
 ```bash
-make setup
+make setup                                          # interactive
+make setup ARGS="-y"                                # accept every default
+make setup ARGS="-y -server=false -packages=retry"  # scraper only, keep pkg/retry
 ```
+
+Flags: `-server`, `-client`, `-docker`, `-postgres` (default `true`), `-postgres-hosting` (`docker` or `external`), `-packages` (comma-separated: `worker`, `retry`, `state`, `cycle`, `fake`, `ptr`), and `-y` to skip the form.
 
 ## Setup
 
-**Prerequisites:** [Go 1.26+](https://go.dev/dl/), [Docker](https://docs.docker.com/get-docker/), [goose](https://github.com/pressly/goose), [sqlc](https://sqlc.dev)
+**Prerequisites:** [Go 1.27+](https://go.dev/dl/), and [Docker](https://docs.docker.com/get-docker/) for the container and database targets. Tools such as golangci-lint, goose, and sqlc run through `go run` at pinned versions.
 
 1. Replace `pkg/template` with your own domain logic
-2. Update `cmd/template/main.go` to wire your services
-3. Add SQL queries to `pkg/db/queries/` and run `make generate`
+2. Wire your services in `cmd/template/main.go`
+3. Add migrations with `make migrate-new name=<name>`, queries to `pkg/db/queries/`, then run `make generate`
 4. Copy and configure your environment:
 
 ```bash
@@ -46,93 +48,117 @@ cp .env.example .env
 Locally:
 
 ```bash
+make db    # optional: start PostgreSQL on localhost:5432
 make dev
 ```
 
-Or with Docker:
+With Docker Compose, which also points the app at the bundled database:
 
 ```bash
-make up
+make up     # build and start in the background
+make watch  # or: hot reload on file changes
 ```
+
+The entrypoint runs each enabled workload concurrently: the HTTP server until it receives `SIGINT` or `SIGTERM`, and the client workload once. If either fails, the other is stopped and the process exits non-zero.
 
 ## Project Structure
 
 ```
 go-template/
-├── cmd/template/       entrypoint
+├── .agents/skills/     go-style coding guide for AI agents
+├── cmd/
+│   ├── setup/          interactive feature selection (deletes itself)
+│   └── template/       entrypoint: config, dependencies, workloads
 ├── pkg/
-│   ├── client/         HTTP client via fphttp (TLS/HTTP2 fingerprinting, proxy, cookies)
-│   ├── cycle/          thread-safe round-robin file-backed line cycling
+│   ├── apperr/         application error types and sentinels
+│   ├── client/         fphttp client: TLS/HTTP2 fingerprints, cookies, redirects, proxies
+│   ├── cycle/          thread-safe round-robin file-backed line rotation
 │   ├── db/             PostgreSQL pool, sqlc queries, transactions, advisory locks
-│   ├── env/            .env loader and struct-tag validation
-│   ├── log/            structured slog with tint and context injection
-│   ├── ptr/            generic pointer helpers
-│   ├── retry/          exponential backoff with jitter
-│   ├── state/          file-backed JSON persistence with file locking
-│   ├── template/       skeleton domain service (replace this)
+│   ├── env/            .env loader and struct-tag config parsing
+│   ├── fake/           fake data generation
+│   ├── handler/        HTTP handlers, liveness and readiness probes
+│   ├── log/            slog with tint and request-scoped context values
+│   ├── middleware/     request ID, request logging, panic recovery
+│   ├── ptr/            nil-safe pointer helpers
+│   ├── respond/        JSON response helpers
+│   ├── retry/          exponential backoff with full jitter
+│   ├── service/        business logic behind consumer-defined interfaces
+│   ├── state/          file-backed JSON state with locking and atomic saves
+│   ├── template/       example client workload (replace this)
 │   └── worker/         bounded-concurrency primitives via errgroup
-├── Dockerfile          multi-stage: dev, builder, production (Alpine)
-├── compose.yaml        dev mode with docker compose watch
-└── Makefile
+├── Dockerfile          multi-stage: dev, builder (multi-arch), production (Alpine, non-root)
+├── compose.yaml        app and PostgreSQL with docker compose watch
+└── Makefile            run `make` to list targets
 ```
 
 ## Development
 
-| Command         | Description                                      |
-| --------------- | ------------------------------------------------ |
-| `make dev`      | Run the application                              |
-| `make build`    | Compile binary to `bin/template`                 |
-| `make test`     | Run tests with race detector via `go test -race` |
-| `make lint`     | Static analysis via `go vet`                     |
-| `make fix`      | Modernize code via `go fix`                      |
-| `make format`   | Format code via `go fmt`                         |
-| `make generate` | Run code generation via `sqlc generate`          |
+| Command         | Description                                  |
+| --------------- | -------------------------------------------- |
+| `make dev`      | Run the application                          |
+| `make build`    | Compile the binary to `bin/template`         |
+| `make lint`     | Static analysis via golangci-lint            |
+| `make format`   | Format with gofmt and goimports              |
+| `make fix`      | Modernize code via `go fix`                  |
+| `make test`     | Run tests with the race detector             |
+| `make generate` | Run code generation (`sqlc generate`)        |
 
 ### Database
 
-| Command             | Description                          |
-| ------------------- | ------------------------------------ |
-| `make db`           | Start postgres only (localhost:5432) |
-| `make db-down`      | Stop postgres                        |
-| `make migrate`      | Run migrations up                    |
-| `make migrate-down` | Roll back last migration             |
-| `make migrate-new`  | Create a new migration file          |
+| Command                       | Description                            |
+| ----------------------------- | -------------------------------------- |
+| `make db`                     | Start PostgreSQL only (localhost:5432) |
+| `make db-down`                | Stop PostgreSQL                        |
+| `make migrate`                | Apply migrations                       |
+| `make migrate-down`           | Roll back the last migration           |
+| `make migrate-new name=<name>` | Create a migration file               |
 
-The postgres service is opt-in. `make db` starts it locally on `localhost:5432`. To use an external database instead, skip `make db` and set `DATABASE_URL` in `.env` to point at your instance.
+To use an external database, choose external hosting during setup and set `DATABASE_URL` in `.env`.
 
 ### Docker
 
 | Command      | Description                         |
 | ------------ | ----------------------------------- |
-| `make up`    | Start full stack (app + postgres)   |
-| `make down`  | Stop all services                   |
+| `make up`    | Build and start the stack           |
+| `make down`  | Stop the stack                      |
 | `make watch` | Hot reload via docker compose watch |
+
+### HTTP Endpoints
+
+| Route              | Description                                 |
+| ------------------ | ------------------------------------------- |
+| `GET /livez`       | Liveness: the process is serving requests   |
+| `GET /readyz`      | Readiness: the database answers a ping      |
+| `GET /api/example` | Example handler backed by a sqlc query      |
 
 ### Releases
 
-A manual GitHub Actions workflow is provided for releases:
+Pushing a `v*.*.*` tag runs the CI checks and publishes a GitHub Release with generated notes:
 
-1. Open **Actions** -> **Release**
-2. Click **Run workflow**
-3. Either:
-   - enter an explicit version such as `v1.2.3`, or
-   - leave `version` empty and choose a `patch`, `minor`, or `major` bump
-4. Optionally choose a ref and whether the release is a prerelease
-
-The workflow resolves the final version, validates it, runs `go vet` and `go test -race`, pushes the git tag, and creates a GitHub Release with autogenerated notes.
-
-Automatic increment uses the highest existing stable semver tag matching `v<major>.<minor>.<patch>`. If no tags exist yet, the first auto-incremented release starts from `v0.0.1`.
+```bash
+git tag v1.2.3
+git push origin v1.2.3
+```
 
 ## Configuration
 
-Configured via environment variables. Copy `.env.example` to `.env` to get started.
+Configured via environment variables, loaded from `.env` when present. Process environment variables take precedence.
 
-The HTTP client verifies TLS certificates by default. If you need scraper-style insecure TLS for a specific target, enable it explicitly with `client.WithInsecureSkipVerify(true)`.
+| Variable           | Required | Default | Description                                       |
+| ------------------ | -------- | ------- | ------------------------------------------------- |
+| `LOG_LEVEL`        | No       | `info`  | `debug`, `info`, `warn`, `error`                  |
+| `PROXY`            | No       | none    | Client proxy: `host:port` or `host:port:user:pass` |
+| `DATABASE_URL`     | Yes      | none    | PostgreSQL connection string                      |
+| `PORT`             | No       | `8080`  | HTTP server port                                  |
+| `READ_TIMEOUT`     | No       | `10s`   | Server read timeout                               |
+| `WRITE_TIMEOUT`    | No       | `10s`   | Server write timeout                              |
+| `SHUTDOWN_TIMEOUT` | No       | `10s`   | Graceful shutdown deadline                        |
 
-| Variable       | Required | Default | Description                      |
-| -------------- | -------- | ------- | -------------------------------- |
-| `DATABASE_URL` | Yes      | none    | PostgreSQL connection string     |
-| `LOG_LEVEL`    | No       | `info`  | `debug`, `info`, `warn`, `error` |
+The HTTP client presents Chrome on Windows by default and verifies TLS certificates. Choose another identity with `client.WithBrowser` and `client.WithPlatform`, or supply any fphttp profile with `client.WithFingerprint`. Enable `client.WithInsecureSkipVerify(true)` only for targets that require it.
+
+## Style Guide
+
+Code follows the `go-style` skill in [`.agents/skills/go-style`](.agents/skills/go-style/SKILL.md), which agents such as Codex, Cursor, and Gemini discover automatically.
 
 ## License
 

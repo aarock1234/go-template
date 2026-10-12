@@ -10,6 +10,7 @@ import (
 
 func lockFile(f *os.File) error {
 	var overlapped windows.Overlapped
+
 	return windows.LockFileEx(
 		windows.Handle(f.Fd()),
 		windows.LOCKFILE_EXCLUSIVE_LOCK|windows.LOCKFILE_FAIL_IMMEDIATELY,
@@ -21,10 +22,17 @@ func lockFile(f *os.File) error {
 
 func unlockFile(f *os.File) error {
 	var overlapped windows.Overlapped
+
 	return windows.UnlockFileEx(
 		windows.Handle(f.Fd()),
 		0,
 		1, 0,
 		&overlapped,
 	)
+}
+
+// syncDir is a no-op: Windows cannot flush a directory handle, and NTFS
+// journals the rename itself.
+func syncDir(string) error {
+	return nil
 }

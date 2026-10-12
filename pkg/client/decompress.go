@@ -3,75 +3,97 @@ package client
 import (
 	"compress/gzip"
 	"compress/zlib"
+	"errors"
 	"fmt"
 	"io"
-	"log/slog"
+	"strings"
 
 	http "github.com/aarock1234/fphttp"
 	"github.com/andybalholm/brotli"
 	"github.com/klauspost/compress/zstd"
 )
 
-// decompressResponse replaces resp.Body with a decompressing reader based on
-// the Content-Encoding header. After decompression, the Content-Encoding
-// header is removed, Content-Length is set to -1, and Uncompressed is set
-// to true. If the encoding is empty or unrecognized, resp is unchanged.
-func decompressResponse(resp *http.Response) error {
-	encoding := resp.Header.Get("Content-Encoding")
-	if encoding == "" {
-		return nil
+// decompress replaces resp.Body with a reader that decodes its single
+// Content-Encoding, then removes the Content-Encoding and Content-Length
+// headers and marks the response as uncompressed. Unknown or stacked
+// encodings leave resp unchanged.
+func decompress(resp *http.Response) {
+	encoding := strings.ToLower(strings.TrimSpace(resp.Header.Get("Content-Encoding")))
+	if resp.Uncompressed || !supportedEncoding(encoding) {
+		return
 	}
 
-	var (
-		reader io.ReadCloser
-		err    error
-	)
-
-	switch encoding {
-	case "gzip":
-		reader, err = gzip.NewReader(resp.Body)
-		if err != nil {
-			return fmt.Errorf("creating gzip reader: %w", err)
-		}
-	case "deflate":
-		reader, err = zlib.NewReader(resp.Body)
-		if err != nil {
-			return fmt.Errorf("creating deflate reader: %w", err)
-		}
-	case "br":
-		reader = io.NopCloser(brotli.NewReader(resp.Body))
-	case "zstd":
-		dec, err := zstd.NewReader(resp.Body)
-		if err != nil {
-			return fmt.Errorf("creating zstd reader: %w", err)
-		}
-		reader = dec.IOReadCloser()
-	default:
-		slog.Warn("unknown content encoding, skipping decompression", "encoding", encoding)
-		return nil
+	resp.Body = &decodingBody{
+		body:     resp.Body,
+		encoding: encoding,
 	}
-
-	resp.Body = &decompressBody{
-		ReadCloser: reader,
-		original:   resp.Body,
-	}
+	resp.Header.Del("Content-Encoding")
+	resp.Header.Del("Content-Length")
+	resp.ContentLength = -1
 	resp.Uncompressed = true
-
-	return nil
 }
 
-// decompressBody wraps a decompressing reader and closes both the
-// decompressor and the original response body.
-type decompressBody struct {
-	io.ReadCloser
-	original io.ReadCloser
+// supportedEncoding reports whether decompress can decode encoding.
+func supportedEncoding(encoding string) bool {
+	switch encoding {
+	case "gzip", "x-gzip", "deflate", "br", "zstd":
+		return true
+	default:
+		return false
+	}
 }
 
-func (d *decompressBody) Close() error {
-	err := d.ReadCloser.Close()
-	if closeErr := d.original.Close(); closeErr != nil && err == nil {
-		err = closeErr
+// decodingBody decodes a response body. The decoder is created on the
+// first Read, so a body that is never read, such as an empty one, needs no
+// valid encoding header, and decoding errors surface from Read.
+type decodingBody struct {
+	body     io.ReadCloser
+	encoding string
+	decoder  io.ReadCloser
+	err      error
+}
+
+// Read reads decoded bytes from the body.
+func (b *decodingBody) Read(p []byte) (int, error) {
+	if b.decoder == nil && b.err == nil {
+		b.decoder, b.err = newDecoder(b.encoding, b.body)
 	}
 
-	return err
+	if b.err != nil {
+		return 0, b.err
+	}
+
+	return b.decoder.Read(p)
+}
+
+// Close releases the decoder and closes the underlying body.
+func (b *decodingBody) Close() error {
+	var decoderErr error
+	if b.decoder != nil {
+		decoderErr = b.decoder.Close()
+	}
+
+	return errors.Join(decoderErr, b.body.Close())
+}
+
+// newDecoder returns a reader that decodes r. Errors from the gzip and
+// zlib readers are returned unwrapped, so an empty body reads as io.EOF.
+func newDecoder(encoding string, r io.Reader) (io.ReadCloser, error) {
+	switch encoding {
+	case "gzip", "x-gzip":
+		return gzip.NewReader(r)
+	case "deflate":
+		return zlib.NewReader(r)
+	case "br":
+		return io.NopCloser(brotli.NewReader(r)), nil
+	case "zstd":
+		decoder, err := zstd.NewReader(r, zstd.WithDecoderConcurrency(1))
+		if err != nil {
+			return nil, fmt.Errorf("create zstd decoder: %w", err)
+		}
+
+		return decoder.IOReadCloser(), nil
+	default:
+		return nil, fmt.Errorf("unsupported content encoding %q", encoding)
+	}
 }

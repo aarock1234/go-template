@@ -40,11 +40,6 @@ sql:
             go_type:
               import: "github.com/aarondl/null/v9"
               type: "Int16"
-          - db_type: "pg_catalog.int4"
-            nullable: true
-            go_type:
-              import: "github.com/aarondl/null/v9"
-              type: "Int32"
           - db_type: "pg_catalog.int8"
             nullable: true
             go_type:

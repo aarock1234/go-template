@@ -1,12 +1,14 @@
 // Package db wraps pgxpool with sqlc-generated queries, transaction helpers,
 // and advisory lock support.
 //
-//go:generate go run github.com/sqlc-dev/sqlc/cmd/sqlc@latest generate -f sqlc.yaml
+//go:generate go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1 generate -f sqlc.yaml
 package db
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -14,13 +16,18 @@ import (
 	"github.com/aarock1234/go-template/pkg/db/sqlc"
 )
 
+// rollbackTimeout bounds a rollback that runs after the caller's context
+// may already be canceled.
+const rollbackTimeout = 5 * time.Second
+
 // DB provides a connection pool with query execution and transaction support.
 type DB struct {
 	pool *pgxpool.Pool
 	*sqlc.Queries
 }
 
-// New creates a new database connection pool and pings to verify connectivity.
+// New creates a connection pool for url and pings the database to verify
+// connectivity.
 func New(ctx context.Context, url string) (*DB, error) {
 	pool, err := pgxpool.New(ctx, url)
 	if err != nil {
@@ -57,9 +64,10 @@ func (d *DB) AcquireConn(ctx context.Context) (*pgxpool.Conn, error) {
 }
 
 // TryAdvisoryLock attempts to acquire a session-level Postgres advisory
-// lock on the given connection. Returns true if the lock was acquired.
+// lock on the given connection. It reports whether the lock was acquired.
 func TryAdvisoryLock(ctx context.Context, conn *pgxpool.Conn, key int64) (bool, error) {
 	var locked bool
+
 	err := conn.QueryRow(ctx, "SELECT pg_try_advisory_lock($1)", key).Scan(&locked)
 	if err != nil {
 		return false, fmt.Errorf("pg_try_advisory_lock: %w", err)
@@ -69,8 +77,8 @@ func TryAdvisoryLock(ctx context.Context, conn *pgxpool.Conn, key int64) (bool, 
 }
 
 // Begin starts a transaction and returns a Querier bound to it along with
-// the underlying pgx.Tx. The caller is responsible for calling Commit or
-// Rollback on the transaction.
+// the underlying pgx.Tx. Ownership passes to the caller, who must call
+// Commit or Rollback on the transaction.
 //
 // Prefer InTx for the common case. Use Begin when the transaction must span
 // multiple call sites or cannot be expressed as a single callback.
@@ -83,18 +91,27 @@ func (d *DB) Begin(ctx context.Context) (sqlc.Querier, pgx.Tx, error) {
 	return sqlc.New(tx), tx, nil
 }
 
-// InTx executes fn inside a database transaction. The transaction is
-// automatically rolled back if fn returns an error or panics. On success
-// the transaction is committed.
-func (d *DB) InTx(ctx context.Context, fn func(sqlc.Querier) error) error {
+// InTx runs fn inside a transaction and commits it when fn succeeds. The
+// transaction is rolled back if fn returns an error or panics, using a
+// fresh bounded context so the rollback is still sent after ctx is
+// canceled. fn borrows the Querier for the duration of the call and must
+// not retain it.
+func (d *DB) InTx(ctx context.Context, fn func(sqlc.Querier) error) (err error) {
 	q, tx, err := d.Begin(ctx)
 	if err != nil {
 		return err
 	}
-	// Rollback is deferred to ensure the transaction is always cleaned up, even
-	// on panic. After a successful Commit the connection is already closed, so
-	// Rollback returns an error that is safe to ignore.
-	defer func() { _ = tx.Rollback(ctx) }()
+
+	defer func() {
+		rollbackCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), rollbackTimeout)
+		defer cancel()
+
+		// After a successful commit, Rollback reports ErrTxClosed.
+		rollbackErr := tx.Rollback(rollbackCtx)
+		if rollbackErr != nil && !errors.Is(rollbackErr, pgx.ErrTxClosed) {
+			err = errors.Join(err, fmt.Errorf("rollback transaction: %w", rollbackErr))
+		}
+	}()
 
 	if err := fn(q); err != nil {
 		return err

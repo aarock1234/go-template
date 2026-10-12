@@ -2,46 +2,15 @@ package client
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"slices"
 	"strconv"
 	"strings"
 )
-
-// Proxy holds a parsed proxy configuration.
-type Proxy struct {
-	Scheme   ProxyScheme
-	Host     string
-	Port     string
-	Username string
-	Password string
-}
-
-// URL returns the proxy as a *url.URL suitable for http.Transport.Proxy.
-func (p *Proxy) URL() *url.URL {
-	u := &url.URL{
-		Scheme: string(p.Scheme),
-		Host:   p.Host + ":" + p.Port,
-	}
-
-	if p.Username != "" && p.Password != "" {
-		u.User = url.UserPassword(p.Username, p.Password)
-	}
-
-	return u
-}
-
-// String returns the proxy in "host:port" or "host:port:user:pass" format.
-func (p *Proxy) String() string {
-	s := p.Host + ":" + p.Port
-	if p.Username != "" && p.Password != "" {
-		s += ":" + p.Username + ":" + p.Password
-	}
-
-	return s
-}
 
 // ProxyScheme identifies the protocol used to connect through a proxy.
 type ProxyScheme string
@@ -64,66 +33,94 @@ func (s ProxyScheme) String() string {
 
 // ParseProxyScheme converts a string to a ProxyScheme.
 func ParseProxyScheme(scheme string) (ProxyScheme, error) {
-	switch ProxyScheme(scheme) {
-	case ProxySchemeHTTP:
-		return ProxySchemeHTTP, nil
-	case ProxySchemeHTTPS:
-		return ProxySchemeHTTPS, nil
-	case ProxySchemeSOCKS5:
-		return ProxySchemeSOCKS5, nil
-	case ProxySchemeSOCKS5H:
-		return ProxySchemeSOCKS5H, nil
+	switch s := ProxyScheme(scheme); s {
+	case ProxySchemeHTTP, ProxySchemeHTTPS, ProxySchemeSOCKS5, ProxySchemeSOCKS5H:
+		return s, nil
+	default:
+		return "", fmt.Errorf("invalid proxy scheme %q", scheme)
 	}
-
-	return "", fmt.Errorf("invalid proxy scheme: %s", scheme)
 }
 
-// ParseProxy parses a "host:port" or "host:port:user:pass" string into a Proxy.
-// An empty string returns (nil, nil).
+// Proxy holds a parsed proxy configuration.
+type Proxy struct {
+	Scheme   ProxyScheme
+	Host     string
+	Port     string
+	Username string
+	Password string
+}
+
+// URL returns the proxy as a URL suitable for Transport.Proxy, including
+// its credentials.
+func (p *Proxy) URL() *url.URL {
+	u := &url.URL{
+		Scheme: string(p.Scheme),
+		Host:   net.JoinHostPort(p.Host, p.Port),
+	}
+
+	if p.Username != "" && p.Password != "" {
+		u.User = url.UserPassword(p.Username, p.Password)
+	}
+
+	return u
+}
+
+// String returns the proxy URL with its password redacted, so a Proxy can
+// be logged or formatted safely.
+func (p *Proxy) String() string {
+	return p.URL().Redacted()
+}
+
+// ParseProxy parses a "host:port" or "host:port:user:pass" string into a
+// Proxy. An empty or whitespace-only string returns (nil, nil). The format
+// cannot represent IPv6 hosts or credentials containing colons. Errors
+// never include the input, which may contain credentials.
 func ParseProxy(proxy string, scheme ProxyScheme) (*Proxy, error) {
 	proxy = strings.TrimSpace(proxy)
 	if proxy == "" {
 		return nil, nil
 	}
 
-	split := strings.Split(proxy, ":")
-	if len(split) != 2 && len(split) != 4 {
-		return nil, fmt.Errorf("got %d proxy parts, want 2 or 4: %v", len(split), split)
+	fields := strings.Split(proxy, ":")
+	if len(fields) != 2 && len(fields) != 4 {
+		return nil, fmt.Errorf("got %d proxy fields, want 2 or 4", len(fields))
 	}
 
-	if slices.Contains(split, "") {
-		return nil, fmt.Errorf("got empty proxy part: %v", split)
+	if slices.Contains(fields, "") {
+		return nil, errors.New("proxy fields must not be empty")
 	}
 
-	if _, err := strconv.Atoi(split[1]); err != nil {
-		return nil, fmt.Errorf("got invalid port %q, want numeric: %w", split[1], err)
+	if port, err := strconv.Atoi(fields[1]); err != nil || port < 1 || port > 65535 {
+		return nil, errors.New("proxy port must be an integer between 1 and 65535")
 	}
 
-	p := &Proxy{
+	parsed := &Proxy{
 		Scheme: scheme,
-		Host:   split[0],
-		Port:   split[1],
+		Host:   fields[0],
+		Port:   fields[1],
 	}
 
-	if len(split) == 4 {
-		p.Username = split[2]
-		p.Password = split[3]
+	if len(fields) == 4 {
+		parsed.Username = fields[2]
+		parsed.Password = fields[3]
 	}
 
-	return p, nil
+	return parsed, nil
 }
 
-// ImportProxies reads and parses proxy configurations from a file.
+// ImportProxies reads proxies from a file with one ParseProxy string per
+// line, skipping blank lines.
 func ImportProxies(filename string, scheme ProxyScheme) ([]*Proxy, error) {
 	f, err := os.Open(filename)
 	if err != nil {
-		return nil, fmt.Errorf("opening proxy file: %w", err)
+		return nil, fmt.Errorf("open proxy file: %w", err)
 	}
 	defer func() { _ = f.Close() }()
 
 	var proxies []*Proxy
+
 	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
+	for lineNumber := 1; scanner.Scan(); lineNumber++ {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
 			continue
@@ -131,14 +128,14 @@ func ImportProxies(filename string, scheme ProxyScheme) ([]*Proxy, error) {
 
 		proxy, err := ParseProxy(line, scheme)
 		if err != nil {
-			return nil, fmt.Errorf("parsing proxy line %q: %w", line, err)
+			return nil, fmt.Errorf("parse proxy on line %d: %w", lineNumber, err)
 		}
 
 		proxies = append(proxies, proxy)
 	}
 
 	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("scanning proxy file: %w", err)
+		return nil, fmt.Errorf("scan proxy file: %w", err)
 	}
 
 	return proxies, nil

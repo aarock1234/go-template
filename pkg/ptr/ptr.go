@@ -1,24 +1,20 @@
-// Package ptr provides nil-safe pointer dereferencing and comparison utilities.
+// Package ptr provides nil-safe pointer dereferencing and comparison
+// helpers. To take the address of a value, use new(expr).
 package ptr
 
-// To creates a pointer to a value.
-//
-// Deprecated: Use new(expr) instead (Go 1.26+).
-func To[T any](v T) *T {
-	return new(v)
-}
-
-// ValueOrZero returns the value of the pointer, or the zero value of T if nil.
+// ValueOrZero returns the value p points to, or the zero value of T if p is
+// nil.
 func ValueOrZero[T any](p *T) T {
 	if p == nil {
 		var zero T
+
 		return zero
 	}
 
 	return *p
 }
 
-// ValueOr returns the value of the pointer, or the fallback if nil.
+// ValueOr returns the value p points to, or fallback if p is nil.
 func ValueOr[T any](p *T, fallback T) T {
 	if p == nil {
 		return fallback
@@ -27,8 +23,8 @@ func ValueOr[T any](p *T, fallback T) T {
 	return *p
 }
 
-// Equal reports whether two pointers point to equal values.
-// Returns true if both are nil, false if only one is nil.
+// Equal reports whether a and b point to equal values. Two nil pointers are
+// equal; a nil and a non-nil pointer are not.
 func Equal[T comparable](a, b *T) bool {
 	if a == nil || b == nil {
 		return a == nil && b == nil

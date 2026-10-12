@@ -3,147 +3,84 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
-	"os/exec"
-	"slices"
 	"strings"
 )
 
-// removeFeature applies all removal operations for a feature.
-// Individual failures are collected and returned as a joined error.
-func removeFeature(f feature) error {
+// markedFile is a project file parsed for feature markers.
+type markedFile struct {
+	path  string
+	crlf  bool // whether the file is written back with CRLF line endings
+	lines []markedLine
+}
+
+// loadMarkedFiles reads and parses each file in paths, skipping files that
+// do not exist. It reads everything before setup changes anything, so a
+// malformed marker aborts setup with the project untouched.
+func loadMarkedFiles(paths []string) ([]markedFile, error) {
+	var files []markedFile
+
+	for _, path := range paths {
+		data, err := os.ReadFile(path)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+
+		if err != nil {
+			return nil, fmt.Errorf("read %s: %w", path, err)
+		}
+
+		// Parse with "\n" line endings. A file using any CRLF line ending is
+		// written back with CRLF throughout.
+		text := string(data)
+		crlf := strings.Contains(text, "\r\n")
+
+		lines, err := parseMarkers(strings.ReplaceAll(text, "\r\n", "\n"))
+		if err != nil {
+			return nil, fmt.Errorf("parse markers in %s: %w", path, err)
+		}
+
+		file := markedFile{
+			path:  path,
+			crlf:  crlf,
+			lines: lines,
+		}
+		files = append(files, file)
+	}
+
+	return files, nil
+}
+
+// rewriteFiles rewrites each file without the sections tagged with removed
+// and without any remaining markers. Individual failures are joined.
+func rewriteFiles(files []markedFile, removed []tag) error {
 	var errs []error
 
-	for _, dir := range f.dirs {
-		if err := removeDir(dir); err != nil {
-			errs = append(errs, err)
+	for _, file := range files {
+		data := render(file.lines, removed)
+		if file.crlf {
+			data = strings.ReplaceAll(data, "\n", "\r\n")
 		}
-	}
 
-	for _, file := range f.files {
-		if err := removeFile(file); err != nil {
-			errs = append(errs, err)
-		}
-	}
-
-	for _, s := range f.sections {
-		if err := removeMarkedSections(s.file, s.tag); err != nil {
-			errs = append(errs, err)
-		}
-	}
-
-	for _, svc := range f.compose {
-		if err := removeComposeService(fileCompose, svc); err != nil {
-			errs = append(errs, err)
+		if err := os.WriteFile(file.path, []byte(data), 0o644); err != nil {
+			errs = append(errs, fmt.Errorf("write %s: %w", file.path, err))
 		}
 	}
 
 	return errors.Join(errs...)
 }
 
-// removeDir deletes a directory tree. Returns nil if the path does not exist.
-func removeDir(path string) error {
-	if err := os.RemoveAll(path); err != nil {
-		return fmt.Errorf("remove directory %s: %w", path, err)
-	}
-	return nil
-}
+// removePaths deletes each file or directory tree in paths, ignoring paths
+// that do not exist. Individual failures are joined.
+func removePaths(paths []string) error {
+	var errs []error
 
-// removeFile deletes a single file. Returns nil if the file does not exist.
-func removeFile(path string) error {
-	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("remove file %s: %w", path, err)
-	}
-	return nil
-}
-
-var (
-	tagPrefixes = []string{"#", "//"}
-)
-
-// removeMarkedSections removes all lines between "[tag]" and "[/tag]"
-// markers (inclusive) from the file at path. Supports both # and // comment
-// prefixes. Returns nil if the file contains no matching markers.
-func removeMarkedSections(path string, t tag) error {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return fmt.Errorf("read %s: %w", path, err)
-	}
-
-	var (
-		openTags  []string
-		closeTags []string
-	)
-
-	for _, prefix := range tagPrefixes {
-		openTags = append(openTags, fmt.Sprintf("%s [%s]", prefix, t))
-		closeTags = append(closeTags, fmt.Sprintf("%s [/%s]", prefix, t))
-	}
-
-	var (
-		out   []string
-		skip  = false
-		found = false
-	)
-
-	for line := range strings.SplitSeq(string(data), "\n") {
-		trimmed := strings.TrimSpace(line)
-
-		if slices.Contains(openTags, trimmed) {
-			skip = true
-			found = true
-			continue
-		}
-
-		if slices.Contains(closeTags, trimmed) {
-			skip = false
-			continue
-		}
-
-		if !skip {
-			out = append(out, line)
+	for _, path := range paths {
+		if err := os.RemoveAll(path); err != nil {
+			errs = append(errs, fmt.Errorf("remove %s: %w", path, err))
 		}
 	}
 
-	if !found {
-		return nil
-	}
-
-	if err := os.WriteFile(path, []byte(strings.Join(out, "\n")), 0644); err != nil {
-		return fmt.Errorf("write %s: %w", path, err)
-	}
-
-	return nil
-}
-
-// removeSelf deletes the cmd/setup directory and its marked sections in the
-// Makefile, so go mod tidy will also strip any setup-only dependencies.
-func removeSelf() error {
-	return removeFeature(feature{
-		dirs: []string{"cmd/setup"},
-		sections: []section{
-			{
-				file: fileMakefile,
-				tag:  tagSetup,
-			},
-		},
-	})
-}
-
-// tidyModules runs go mod tidy to prune unused dependencies.
-func tidyModules() error {
-	goBin, err := exec.LookPath("go")
-	if err != nil {
-		return fmt.Errorf("find go binary: %w", err)
-	}
-
-	cmd := exec.Command(goBin, "mod", "tidy")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("go mod tidy: %w", err)
-	}
-
-	return nil
+	return errors.Join(errs...)
 }
