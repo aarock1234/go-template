@@ -5,15 +5,13 @@ go 1.27.2
 require (
 	charm.land/huh/v2 v2.0.3
 	charm.land/lipgloss/v2 v2.0.6
-	github.com/aarock1234/fphttp v1.3.1
-	github.com/andybalholm/brotli v1.2.6
+	github.com/aarock1234/fphttp v1.3.2-0.20261014081803-83574491023d
 	github.com/go-chi/chi/v5 v5.3.2
 	github.com/jackc/pgx/v5 v5.11.0
-	github.com/klauspost/compress v1.20.1
 	github.com/lmittmann/tint v1.2.1
 	github.com/mattn/go-colorable v0.1.16
 	github.com/mattn/go-isatty v0.0.24
-	github.com/refraction-networking/utls v1.8.2
+	github.com/refraction-networking/utls v1.8.3-0.20261006222701-ff1b50fbbe9a
 	golang.org/x/sync v0.24.0
 	golang.org/x/sys v0.49.0
 )
@@ -21,6 +19,7 @@ require (
 require (
 	charm.land/bubbles/v2 v2.2.1 // indirect
 	charm.land/bubbletea/v2 v2.1.0 // indirect
+	github.com/andybalholm/brotli v1.2.6 // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/catppuccin/go v0.3.0 // indirect
 	github.com/charmbracelet/colorprofile v0.4.3 // indirect
@@ -37,9 +36,11 @@ require (
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/puddle/v2 v2.2.3 // indirect
+	github.com/klauspost/compress v1.20.3 // indirect
 	github.com/lucasb-eyer/go-colorful v1.4.1 // indirect
 	github.com/mattn/go-runewidth v0.0.31 // indirect
 	github.com/mitchellh/hashstructure/v2 v2.0.2 // indirect
+	github.com/molecule-man/go-brrr v1.2.0 // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/xo/terminfo v1.2.0 // indirect

@@ -2,11 +2,19 @@ package client
 
 import (
 	http "github.com/aarock1234/fphttp"
+	"github.com/aarock1234/fphttp/browser"
 	utls "github.com/refraction-networking/utls"
 )
 
 // Option configures a Client.
 type Option func(*Client)
+
+// WithProfile selects an immutable resolved profile, including channel, device,
+// and configuration variants. It takes precedence over the browser, platform,
+// and version options. Nil restores ordinary catalog selection.
+func WithProfile(profile *browser.Profile) Option {
+	return func(c *Client) { c.profile = profile }
+}
 
 // WithProxy routes requests through a copy of p. A nil p disables the
 // proxy.
@@ -29,8 +37,8 @@ func WithBrowser(b http.Browser) Option {
 	return func(c *Client) { c.browser = b }
 }
 
-// WithBrowserVersion overrides the browser version used in identity
-// headers. By default it matches the selected fingerprint profile.
+// WithBrowserVersion selects a catalogued browser version and its matching
+// wire profile. A major or dotted version prefix selects its latest build.
 func WithBrowserVersion(v string) Option {
 	return func(c *Client) { c.browserVersion = v }
 }
@@ -41,14 +49,15 @@ func WithPlatform(p http.Platform) Option {
 	return func(c *Client) { c.platform = p }
 }
 
-// WithFingerprint replaces the profile selected by browser and platform,
-// for example with http.Chrome148Fetch or a customized profile. New clones
-// f, so the caller keeps ownership.
+// WithFingerprint manually overrides the selected identity's wire profile.
+// New clones f. This does not establish equivalence with the catalogued browser.
 func WithFingerprint(f *http.Fingerprint) Option {
 	return func(c *Client) { c.fingerprint = f }
 }
 
-// WithClientHelloID overrides the TLS ClientHelloID of the fingerprint.
+// WithClientHelloID manually replaces the TLS hello and clears any spec factory.
+// A known identity without a catalog wire definition retains the legacy H2
+// baseline. Use WithFingerprint to supply different connection settings.
 func WithClientHelloID(id utls.ClientHelloID) Option {
 	return func(c *Client) { c.clientHelloID = &id }
 }
@@ -70,6 +79,12 @@ func WithDefaultHeaderOverrides(h http.Header) Option {
 // decompression is disabled.
 func WithDisableDecompression(disable bool) Option {
 	return func(c *Client) { c.disableDecompression = disable }
+}
+
+// WithDisableHeaders disables generated browser headers. Explicit request
+// headers and WithDefaultHeaderOverrides remain in effect.
+func WithDisableHeaders(disable bool) Option {
+	return func(c *Client) { c.disableHeaders = disable }
 }
 
 // WithInsecureSkipVerify controls whether TLS certificate verification is

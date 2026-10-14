@@ -154,7 +154,26 @@ Configured via environment variables, loaded from `.env` when present. Process e
 | `WRITE_TIMEOUT`    | No       | `10s`   | Server write timeout                              |
 | `SHUTDOWN_TIMEOUT` | No       | `10s`   | Graceful shutdown deadline                        |
 
-The HTTP client presents Chrome on Windows by default and verifies TLS certificates. Choose another identity with `client.WithBrowser` and `client.WithPlatform`, or supply any fphttp profile with `client.WithFingerprint`. Enable `client.WithInsecureSkipVerify(true)` only for targets that require it.
+The HTTP client resolves the latest catalogued Chrome identity on Windows and
+verifies TLS certificates. Select a product, platform, and version with
+`client.WithBrowser`, `client.WithPlatform`, and `client.WithBrowserVersion`.
+Version prefixes resolve matching wire profiles as well as headers. Unknown or
+unavailable builds return errors; inspect `Descriptor()` for availability and
+configuration sources. `client.WithFingerprint` and `client.WithClientHelloID` remain explicit
+manual overrides. `client.WithProfile` accepts a resolved profile for selecting
+channels, devices, and explicit configuration variants. Manual overrides can use
+known published identity metadata even when its catalog wire definition is
+unavailable.
+
+`Do` generates basic identity headers. Use `DoWithOptions` with fphttp's
+`browser.RequestOptions` for explicit navigation, fetch, and resource context.
+The browser client owns redirects, contextual headers, hint restarts, and
+response decoding. The template retains its cookie jar, cookie serializer,
+custom extractor, and proxy configuration. `ClearCookies` also clears learned
+client hints. `client.WithDisableHeaders(true)` disables generated fields;
+explicit headers and configured overrides still apply.
+
+Enable `client.WithInsecureSkipVerify(true)` only for targets that require it.
 
 ## Style Guide
 
