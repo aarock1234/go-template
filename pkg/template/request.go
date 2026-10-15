@@ -7,7 +7,7 @@ import (
 	"io"
 	"time"
 
-	http "github.com/aarock1234/fphttp"
+	http "github.com/aarock1234/fphttp/v2"
 )
 
 const (

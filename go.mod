@@ -5,13 +5,12 @@ go 1.27.2
 require (
 	charm.land/huh/v2 v2.0.3
 	charm.land/lipgloss/v2 v2.0.6
-	github.com/aarock1234/fphttp v1.3.2-0.20261014081803-83574491023d
+	github.com/aarock1234/fphttp/v2 v2.0.0
 	github.com/go-chi/chi/v5 v5.3.2
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/lmittmann/tint v1.2.1
 	github.com/mattn/go-colorable v0.1.16
 	github.com/mattn/go-isatty v0.0.24
-	github.com/refraction-networking/utls v1.8.3-0.20261006222701-ff1b50fbbe9a
 	golang.org/x/sync v0.24.0
 	golang.org/x/sys v0.49.0
 )
@@ -42,6 +41,7 @@ require (
 	github.com/mitchellh/hashstructure/v2 v2.0.2 // indirect
 	github.com/molecule-man/go-brrr v1.2.0 // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect
+	github.com/refraction-networking/utls v1.8.3-0.20261006222701-ff1b50fbbe9a // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/xo/terminfo v1.2.0 // indirect
 	golang.org/x/crypto v0.58.0 // indirect

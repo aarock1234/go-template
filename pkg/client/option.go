@@ -1,18 +1,17 @@
 package client
 
 import (
-	http "github.com/aarock1234/fphttp"
-	"github.com/aarock1234/fphttp/browser"
-	utls "github.com/refraction-networking/utls"
+	http "github.com/aarock1234/fphttp/v2"
 )
 
 // Option configures a Client.
 type Option func(*Client)
 
-// WithProfile selects an immutable resolved profile, including channel, device,
-// and configuration variants. It takes precedence over the browser, platform,
-// and version options. Nil restores ordinary catalog selection.
-func WithProfile(profile *browser.Profile) Option {
+// WithProfile sends requests as profile describes, which may be one from
+// http.NewProfile that the caller has changed. It takes precedence over the
+// browser, platform, and version options. New copies the profile. Nil
+// restores ordinary catalog selection.
+func WithProfile(profile *http.Profile) Option {
 	return func(c *Client) { c.profile = profile }
 }
 
@@ -31,60 +30,36 @@ func WithProxy(p *Proxy) Option {
 	}
 }
 
-// WithBrowser sets the browser whose fingerprint and identity headers the
-// client presents.
+// WithBrowser sets the browser the client presents.
 func WithBrowser(b http.Browser) Option {
 	return func(c *Client) { c.browser = b }
 }
 
-// WithBrowserVersion selects a catalogued browser version and its matching
-// wire profile. A major or dotted version prefix selects its latest build.
-func WithBrowserVersion(v string) Option {
-	return func(c *Client) { c.browserVersion = v }
-}
-
-// WithPlatform sets the operating system whose fingerprint and identity
-// headers the client presents.
+// WithPlatform sets the operating system the client presents.
 func WithPlatform(p http.Platform) Option {
 	return func(c *Client) { c.platform = p }
 }
 
-// WithFingerprint manually overrides the selected identity's wire profile.
-// New clones f. This does not establish equivalence with the catalogued browser.
-func WithFingerprint(f *http.Fingerprint) Option {
-	return func(c *Client) { c.fingerprint = f }
+// WithBrowserVersion selects a browser release. A major version such as
+// "152" selects its newest build; http.Latest selects the newest release.
+func WithBrowserVersion(v http.Version) Option {
+	return func(c *Client) { c.version = v }
 }
 
-// WithClientHelloID manually replaces the TLS hello and clears any spec factory.
-// A known identity without a catalog wire definition retains the legacy H2
-// baseline. Use WithFingerprint to supply different connection settings.
-func WithClientHelloID(id utls.ClientHelloID) Option {
-	return func(c *Client) { c.clientHelloID = &id }
-}
-
-// WithCookieExtractor replaces the default Set-Cookie extraction.
-func WithCookieExtractor(fn CookieExtractor) Option {
-	return func(c *Client) { c.extractCookies = fn }
-}
-
-// WithDefaultHeaderOverrides overrides identity headers. An override with
-// an empty value removes the header. The option copies h.
+// WithDefaultHeaderOverrides sets fields sent with every request, replacing
+// the profile's own values such as User-Agent and Accept-Language. An
+// override with an empty value suppresses that field, including ones the
+// browser would generate. The option copies h.
 func WithDefaultHeaderOverrides(h http.Header) Option {
 	snapshot := h.Clone()
 
-	return func(c *Client) { c.defaultHeaderOverrides = snapshot.Clone() }
+	return func(c *Client) { c.headerOverrides = snapshot.Clone() }
 }
 
 // WithDisableDecompression controls whether automatic response
 // decompression is disabled.
 func WithDisableDecompression(disable bool) Option {
 	return func(c *Client) { c.disableDecompression = disable }
-}
-
-// WithDisableHeaders disables generated browser headers. Explicit request
-// headers and WithDefaultHeaderOverrides remain in effect.
-func WithDisableHeaders(disable bool) Option {
-	return func(c *Client) { c.disableHeaders = disable }
 }
 
 // WithInsecureSkipVerify controls whether TLS certificate verification is

@@ -154,24 +154,18 @@ Configured via environment variables, loaded from `.env` when present. Process e
 | `WRITE_TIMEOUT`    | No       | `10s`   | Server write timeout                              |
 | `SHUTDOWN_TIMEOUT` | No       | `10s`   | Graceful shutdown deadline                        |
 
-The HTTP client resolves the latest catalogued Chrome identity on Windows and
-verifies TLS certificates. Select a product, platform, and version with
-`client.WithBrowser`, `client.WithPlatform`, and `client.WithBrowserVersion`.
-Version prefixes resolve matching wire profiles as well as headers. Unknown or
-unavailable builds return errors; inspect `Descriptor()` for availability and
-configuration sources. `client.WithFingerprint` and `client.WithClientHelloID` remain explicit
-manual overrides. `client.WithProfile` accepts a resolved profile for selecting
-channels, devices, and explicit configuration variants. Manual overrides can use
-known published identity metadata even when its catalog wire definition is
-unavailable.
+The HTTP client sends requests as the newest Chrome release on Windows and
+verifies TLS certificates. Select another release with `client.WithBrowser`,
+`client.WithPlatform`, and `client.WithBrowserVersion`, or pass a profile from
+`http.NewProfile` that you have edited to `client.WithProfile`. Unknown
+browsers, platforms, and versions return errors.
 
-`Do` generates basic identity headers. Use `DoWithOptions` with fphttp's
-`browser.RequestOptions` for explicit navigation, fetch, and resource context.
-The browser client owns redirects, contextual headers, hint restarts, and
-response decoding. The template retains its cookie jar, cookie serializer,
-custom extractor, and proxy configuration. `ClearCookies` also clears learned
-client hints. `client.WithDisableHeaders(true)` disables generated fields;
-explicit headers and configured overrides still apply.
+`Do` sends a request as a page load. Set `req.Destination` and `req.Initiator`
+to send it as a `fetch()`, script, or image instead; fphttp derives the
+`Sec-Fetch-*`, `Origin`, `Referer`, and `Accept` headers, the header order, and
+the cookie rules from them. The template keeps its own cookie jar, cookie
+serializer, and proxy configuration. `client.WithDefaultHeaderOverrides`
+replaces headers on every request; an empty value suppresses a header.
 
 Enable `client.WithInsecureSkipVerify(true)` only for targets that require it.
 

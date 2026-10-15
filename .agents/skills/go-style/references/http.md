@@ -14,7 +14,7 @@
 
 Structure: `pkg/client/{client.go, option.go, proxy.go, cookie.go, ...}`
 
-This is the local template's specialized browser-fingerprinting pattern. The current template uses `github.com/aarock1234/fphttp` (imported as `http`) with `github.com/refraction-networking/utls`, rather than the standard-library transport described in the earlier guide. It wraps the client's transport with functional options, typed proxy configuration, custom cookie handling, and manual redirect following. Inspect the actual dependency versions and request/response types before copying a fragment.
+This is the local template's specialized browser-fingerprinting pattern. The current template uses `github.com/aarock1234/fphttp/v2` (imported as `http`), a `net/http` fork with browser fingerprints, rather than the standard-library transport described in the earlier guide. It wraps `http.NewClient` with functional options, typed proxy configuration, and a custom cookie jar, and lets fphttp own redirects, browser headers, and response decoding. Inspect the actual dependency versions and request/response types before copying a fragment.
 
 For ordinary HTTP APIs, prefer a reused standard `net/http.Client` with an explicit deadline policy and a cookie jar when needed. The standard client's jar already receives cookies across redirects; ordinary cookie capture alone does not require a manual redirect engine.
 
@@ -36,16 +36,18 @@ Functional options configure the client. Sensible defaults mean callers only ove
 ```go
 package client
 
-import http "github.com/aarock1234/fphttp"
+import http "github.com/aarock1234/fphttp/v2"
 
-// Client is an HTTP client with TLS fingerprinting, cookie handling,
-// and proxy support.
+// Client sends requests as a selected browser release and owns its
+// cookie storage.
 type Client struct {
     http      *http.Client
     jar       *CookieJar
+    profile   *http.Profile
     proxy     *Proxy
     browser   http.Browser
     platform  http.Platform
+    version   http.Version
     // ...
 }
 
@@ -61,19 +63,20 @@ func New(opts ...Option) (*Client, error) {
         opt(c)
     }
 
-    // resolve TLS/HTTP2 profile from browser+platform, build transport...
+    // resolve the profile with http.NewProfile, then build the client
+    // with http.NewClient, set its Jar, and configure the proxy...
 
     return c, nil
 }
 
-// Do sends an HTTP request. This specialized client follows redirects
-// manually to apply its custom cookie extraction policy.
+// Do sends req with the browser's headers, cookies, and redirect
+// handling. The caller owns the returned response body and must close it.
 func (c *Client) Do(req *http.Request) (*http.Response, error) {
-    // manual redirect loop with cookie capture
+    return c.http.Do(req)
 }
 ```
 
-The abbreviated transport construction and redirect loop describe responsibilities, not a drop-in implementation. For a standard client, use its cookie jar and redirect policy. If manual redirects are required, a body-preserving redirect needs a replayable body and authorization headers need an explicit trusted-target policy. Returning a final response transfers responsibility for closing its body to the caller.
+The abbreviated construction describes responsibilities, not a drop-in implementation. fphttp's `Client` applies the jar, follows redirects, and strips credentials across hosts as a browser does, so the template no longer follows redirects by hand. Returning a final response transfers responsibility for closing its body to the caller.
 
 
 Sources: [reference 1](https://pkg.go.dev/net/http@go1.26.1#Client).
@@ -102,8 +105,8 @@ func WithPlatform(p http.Platform) Option {
     return func(c *Client) { c.platform = p }
 }
 
-func WithCookieExtractor(fn CookieExtractor) Option {
-    return func(c *Client) { c.extractCookies = fn }
+func WithBrowserVersion(v http.Version) Option {
+    return func(c *Client) { c.version = v }
 }
 
 func WithDefaultHeaderOverrides(h http.Header) Option {
@@ -241,7 +244,7 @@ func New(cfg *Config) (*APIClient, error) {
 
     opts := []client.Option{
         client.WithPlatform(http.PlatformWindows),
-        client.WithCookieExtractor(customExtractor),
+        client.WithBrowserVersion("152"),
     }
 
     if proxy != nil {

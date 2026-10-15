@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	http "github.com/aarock1234/fphttp"
+	http "github.com/aarock1234/fphttp/v2"
 )
 
 // CookieJar stores cookies by domain. A cookie with a Domain attribute

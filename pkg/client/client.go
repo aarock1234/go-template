@@ -1,61 +1,42 @@
-// Package client provides browser-aware HTTP requests, custom cookie storage,
-// and proxy support.
+// Package client provides browser-fingerprinted HTTP requests, custom
+// cookie storage, and proxy support.
 package client
 
 import (
-	"errors"
 	"net/url"
 	"slices"
 	"strings"
 
-	http "github.com/aarock1234/fphttp"
-	"github.com/aarock1234/fphttp/browser"
-	utls "github.com/refraction-networking/utls"
+	http "github.com/aarock1234/fphttp/v2"
 )
 
-const maxRedirects = 10
-
-// ErrTooManyRedirects is returned when a request exceeds the redirect limit.
-var ErrTooManyRedirects = errors.New("too many redirects")
-
-// Client presents a selected browser identity and owns its cookie storage.
-// It is safe for concurrent use. Use New to initialize it.
+// Client sends requests as a selected browser release and owns its cookie
+// storage. It is safe for concurrent use. Use New to initialize it.
 type Client struct {
-	http           *browser.Client
-	jar            *CookieJar
-	defaultHeaders http.Header
-	profile        *browser.Profile
+	http    *http.Client
+	jar     *CookieJar
+	profile *http.Profile
 
-	browser                http.Browser
-	platform               http.Platform
-	browserVersion         string
-	fingerprint            *http.Fingerprint
-	clientHelloID          *utls.ClientHelloID
-	proxy                  *Proxy
-	extractCookies         CookieExtractor
-	defaultHeaderOverrides http.Header
-	disableHeaders         bool
-	disableDecompression   bool
-	insecureSkipVerify     bool
+	browser              http.Browser
+	platform             http.Platform
+	version              http.Version
+	proxy                *Proxy
+	headerOverrides      http.Header
+	disableDecompression bool
+	insecureSkipVerify   bool
 }
 
-// Do sends req with basic browser identity headers. It does not modify req.
-// The caller owns the returned response body and must close it.
+// Do sends req with the browser's headers, cookies, and redirect handling.
+// Set req.Destination and req.Initiator to make it look like a fetch, a
+// script, or an image rather than a page load. The caller owns the returned
+// response body and must close it.
 func (c *Client) Do(req *http.Request) (*http.Response, error) {
 	return c.http.Do(req)
 }
 
-// DoWithOptions sends req with explicit browser context or another profile.
-// One operation owns all redirects and eligible client-hint restarts.
-// The caller owns the returned response body and must close it.
-func (c *Client) DoWithOptions(req *http.Request, options browser.RequestOptions) (*http.Response, error) {
-	return c.http.DoWithOptions(req, options)
-}
-
-// Descriptor returns an independently owned snapshot of the default identity.
-// WithFingerprint and WithClientHelloID are manual overrides of its wire data.
-func (c *Client) Descriptor() browser.Descriptor {
-	return c.profile.Descriptor()
+// Profile returns a copy of the profile the client sends requests with.
+func (c *Client) Profile() *http.Profile {
+	return c.profile.Clone()
 }
 
 // SetCookies stores cookies in the jar as if u had set them.
@@ -119,20 +100,14 @@ func (c *Client) CookieString(domain string) string {
 	return cookieHeader(c.Cookies(domain))
 }
 
-// ClearCookies removes all cookies and learned client-hint opt-ins.
+// ClearCookies removes all cookies.
 func (c *Client) ClearCookies() {
 	c.jar.Clear()
-	c.http.ClearClientHints()
 }
 
-// UserAgent returns the default User-Agent header.
+// UserAgent returns the User-Agent header the client sends.
 func (c *Client) UserAgent() string {
-	return c.defaultHeaders.Get("User-Agent")
-}
-
-// ClientHint returns the default Sec-Ch-Ua header, or an empty string.
-func (c *Client) ClientHint() string {
-	return c.defaultHeaders.Get("Sec-Ch-Ua")
+	return c.profile.Header.Get("User-Agent")
 }
 
 // Proxy returns a copy of the proxy configuration, or nil.
