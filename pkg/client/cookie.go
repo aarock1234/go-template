@@ -2,7 +2,9 @@ package client
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	http "github.com/aarock1234/fphttp/v2"
@@ -10,7 +12,7 @@ import (
 
 // ParseCookies parses a Cookie header value ("name=value; name2=value2") or
 // a JSON array of cookie objects. Header pairs without a name or "=" are
-// skipped.
+// skipped; a null entry in a JSON array is an error.
 func ParseCookies(s string) ([]*http.Cookie, error) {
 	s = strings.TrimSpace(s)
 
@@ -18,6 +20,10 @@ func ParseCookies(s string) ([]*http.Cookie, error) {
 		var cookies []*http.Cookie
 		if err := json.Unmarshal([]byte(s), &cookies); err != nil {
 			return nil, fmt.Errorf("decode json cookies: %w", err)
+		}
+
+		if slices.Contains(cookies, nil) {
+			return nil, errors.New("decode json cookies: null cookie")
 		}
 
 		return cookies, nil
