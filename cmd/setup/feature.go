@@ -68,6 +68,7 @@ const (
 	fileCompose      = "compose.yaml"
 	fileDockerfile   = "Dockerfile"
 	fileDockerignore = ".dockerignore"
+	fileGolangci     = ".golangci.yml"
 )
 
 // markedFiles lists every file that may contain markers. Removing a feature

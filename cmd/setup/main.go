@@ -29,6 +29,9 @@
 // `"net/http" // [server]`, marks a single line, which is removed when any of
 // its tags is. After removing the sections of disabled features, setup strips
 // the remaining markers and runs go mod tidy and go fmt.
+//
+// Setup also points tool configuration that names the template's module
+// path, such as the import grouping in .golangci.yml, at the project's own.
 package main
 
 import (
@@ -186,10 +189,11 @@ func parsePackages(list string) ([]string, error) {
 }
 
 // apply removes everything c disables, strips the remaining markers, deletes
-// the setup command, and tidies the module. Malformed markers abort before
-// anything changes. A failed file or directory change does not stop the
-// remaining steps but makes apply return an error. So does a failed or
-// interrupted go mod tidy or go fmt, once the changes themselves succeeded.
+// the setup command, points tool configuration at the project's module path,
+// and tidies the module. Malformed markers abort before anything changes. A
+// failed file or directory change does not stop the remaining steps but makes
+// apply return an error. So does a failed or interrupted go mod tidy or go
+// fmt, once the changes themselves succeeded.
 func apply(ctx context.Context, c config) error {
 	removal := c.removal()
 
@@ -203,6 +207,7 @@ func apply(ctx context.Context, c config) error {
 	changeErr := errors.Join(
 		rewriteFiles(files, removal.tags),
 		removePaths(removal.paths),
+		adoptModulePath(),
 	)
 
 	tidyErr := errors.Join(
