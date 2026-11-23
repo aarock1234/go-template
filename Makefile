@@ -1,12 +1,12 @@
--include .env
-export
-
 # Tool versions. Keep GOLANGCI_LINT_VERSION in sync with .github/workflows/ci.yaml.
 GOLANGCI_LINT_VERSION := v2.14.0
 GOLANGCI_LINT := go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
 # [postgres]
 GOOSE_VERSION := v3.29.0
 GOOSE := go run github.com/pressly/goose/v3/cmd/goose@$(GOOSE_VERSION) -dir pkg/db/migrations
+# Takes DATABASE_URL from the environment, or from .env when it is unset
+# there, as the application does.
+LOAD_DATABASE_URL := [ -n "$$DATABASE_URL" ] || { set -a; . ./.env; set +a; };
 # [/postgres]
 
 .DEFAULT_GOAL := help
@@ -71,10 +71,10 @@ db-down: ## Stop PostgreSQL
 .PHONY: migrate migrate-down migrate-new
 
 migrate: ## Apply all migrations
-	$(GOOSE) postgres "$(DATABASE_URL)" up
+	@$(LOAD_DATABASE_URL) $(GOOSE) postgres "$$DATABASE_URL" up
 
 migrate-down: ## Roll back the last migration
-	$(GOOSE) postgres "$(DATABASE_URL)" down
+	@$(LOAD_DATABASE_URL) $(GOOSE) postgres "$$DATABASE_URL" down
 
 migrate-new: ## Create a migration (make migrate-new name=create_users)
 	@test -n "$(name)" || { echo "usage: make migrate-new name=<migration_name>"; exit 1; }
