@@ -5,7 +5,7 @@ go 1.27.2
 require (
 	charm.land/huh/v2 v2.0.3
 	charm.land/lipgloss/v2 v2.0.6
-	github.com/aarock1234/fphttp/v2 v2.0.0
+	github.com/aarock1234/fphttp/v2 v2.1.3
 	github.com/go-chi/chi/v5 v5.3.2
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/lmittmann/tint v1.2.1
