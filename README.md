@@ -6,6 +6,8 @@
 
 An opinionated Go project template for scraper, bot, and service workloads. Batteries included: a TLS-fingerprinted HTTP client via [`fphttp`](https://github.com/aarock1234/fphttp), an HTTP server with graceful shutdown, exponential backoff, bounded concurrency, crash-safe file-backed state, PostgreSQL, and structured logging.
 
+<!-- [setup] -->
+
 ## Quick Start
 
 Install [`gonew`](https://pkg.go.dev/golang.org/x/tools/cmd/gonew):
@@ -30,13 +32,15 @@ make setup ARGS="-y -server=false -packages=retry"  # scraper only, keep pkg/ret
 
 Flags: `-server`, `-client`, `-docker`, `-postgres` (default `true`), `-postgres-hosting` (`docker` or `external`), `-packages` (comma-separated: `worker`, `retry`, `state`, `cycle`, `fake`, `ptr`), and `-y` to skip the form.
 
+<!-- [/setup] -->
+
 ## Setup
 
 **Prerequisites:** [Go 1.27+](https://go.dev/dl/), and [Docker](https://docs.docker.com/get-docker/) for the container and database targets. Tools such as golangci-lint, goose, and sqlc run through `go run` at pinned versions.
 
-1. Replace `pkg/template` with your own domain logic
+1. Replace `pkg/template` with your own domain logic <!-- [client] -->
 2. Wire your services in `cmd/template/main.go`
-3. Add migrations with `make migrate-new name=<name>`, queries to `pkg/db/queries/`, then run `make generate`
+3. Add migrations with `make migrate-new name=<name>`, queries to `pkg/db/queries/`, then run `make generate` <!-- [postgres] -->
 4. Copy and configure your environment:
 
 ```bash
@@ -45,51 +49,61 @@ cp .env.example .env
 
 ## Running
 
+<!-- [postgres-docker] -->
+
+Optionally start the bundled PostgreSQL on localhost:5432:
+
+```bash
+make db
+```
+
+<!-- [/postgres-docker] -->
+
 Locally:
 
 ```bash
-make db    # optional: start PostgreSQL on localhost:5432
 make dev
 ```
 
-With Docker Compose, which also points the app at the bundled database:
+<!-- [docker] -->
+
+With Docker Compose:
 
 ```bash
 make up     # build and start in the background
 make watch  # or: hot reload on file changes
 ```
 
+<!-- [/docker] -->
+
 The entrypoint runs each enabled workload concurrently: the HTTP server until it receives `SIGINT` or `SIGTERM`, and the client workload once. If either fails, the other is stopped and the process exits non-zero.
 
 ## Project Structure
 
-```
-go-template/
-├── .agents/skills/     go-style coding guide for AI agents
-├── cmd/
-│   ├── setup/          interactive feature selection (deletes itself)
-│   └── template/       entrypoint: config, dependencies, workloads
-├── pkg/
-│   ├── apperr/         application error types and sentinels
-│   ├── client/         fphttp client: TLS/HTTP2 fingerprints, cookies, redirects, proxies
-│   ├── cycle/          thread-safe round-robin file-backed line rotation
-│   ├── db/             PostgreSQL pool, sqlc queries, transactions, advisory locks
-│   ├── env/            .env loader and struct-tag config parsing
-│   ├── fake/           fake data generation
-│   ├── handler/        HTTP handlers, liveness and readiness probes
-│   ├── log/            slog with tint and request-scoped context values
-│   ├── middleware/     request ID, request logging, panic recovery
-│   ├── ptr/            nil-safe pointer helpers
-│   ├── respond/        JSON response helpers
-│   ├── retry/          exponential backoff with full jitter
-│   ├── service/        business logic behind consumer-defined interfaces
-│   ├── state/          file-backed JSON state with locking and atomic saves
-│   ├── template/       example client workload (replace this)
-│   └── worker/         bounded-concurrency primitives via errgroup
-├── Dockerfile          multi-stage: dev, builder (multi-arch), production (Alpine, non-root)
-├── compose.yaml        app and PostgreSQL with docker compose watch
-└── Makefile            run `make` to list targets
-```
+| Path              | Purpose                                                               |
+| ----------------- | --------------------------------------------------------------------- |
+| `.agents/skills/` | go-style coding guide for AI agents                                   |
+| `cmd/setup/`      | interactive feature selection (deletes itself)                        | <!-- [setup] -->
+| `cmd/template/`   | entrypoint: config, dependencies, workloads                           |
+| `pkg/apperr/`     | application error types and sentinels                                 | <!-- [server] -->
+| `pkg/client/`     | fphttp client: TLS/HTTP2 fingerprints, cookies, redirects, proxies    | <!-- [client] -->
+| `pkg/cycle/`      | thread-safe round-robin file-backed line rotation                     | <!-- [cycle] -->
+| `pkg/db/`         | PostgreSQL pool, sqlc queries, transactions, advisory locks           | <!-- [postgres] -->
+| `pkg/env/`        | .env loader and struct-tag config parsing                             |
+| `pkg/fake/`       | fake data generation                                                  | <!-- [fake] -->
+| `pkg/handler/`    | HTTP handlers, liveness and readiness probes                          | <!-- [server] -->
+| `pkg/log/`        | slog with tint and request-scoped context values                      |
+| `pkg/middleware/` | request ID, request logging, panic recovery                           | <!-- [server] -->
+| `pkg/ptr/`        | nil-safe pointer helpers                                              | <!-- [ptr] -->
+| `pkg/respond/`    | JSON response helpers                                                 | <!-- [server] -->
+| `pkg/retry/`      | exponential backoff with full jitter                                  | <!-- [retry] -->
+| `pkg/service/`    | business logic behind consumer-defined interfaces                     | <!-- [server] [postgres] -->
+| `pkg/state/`      | file-backed JSON state with locking and atomic saves                  | <!-- [state] -->
+| `pkg/template/`   | example client workload (replace this)                                | <!-- [client] -->
+| `pkg/worker/`     | bounded-concurrency primitives via errgroup                           | <!-- [worker] -->
+| `Dockerfile`      | multi-stage: dev, builder (multi-arch), production (Alpine, non-root) | <!-- [docker] -->
+| `compose.yaml`    | app and PostgreSQL with docker compose watch                          | <!-- [docker] -->
+| `Makefile`        | run `make` to list targets                                            |
 
 ## Development
 
@@ -103,17 +117,23 @@ go-template/
 | `make test`     | Run tests with the race detector      |
 | `make generate` | Run code generation (`sqlc generate`) |
 
+<!-- [postgres] -->
+
 ### Database
 
 | Command                        | Description                            |
 | ------------------------------ | -------------------------------------- |
-| `make db`                      | Start PostgreSQL only (localhost:5432) |
-| `make db-down`                 | Stop PostgreSQL                        |
+| `make db`                      | Start PostgreSQL only (localhost:5432) | <!-- [postgres-docker] -->
+| `make db-down`                 | Stop PostgreSQL                        | <!-- [postgres-docker] -->
 | `make migrate`                 | Apply migrations                       |
 | `make migrate-down`            | Roll back the last migration           |
 | `make migrate-new name=<name>` | Create a migration file                |
 
-To use an external database, choose external hosting during setup and set `DATABASE_URL` in `.env`.
+To use an external database, set `DATABASE_URL` in `.env`.
+
+<!-- [/postgres] -->
+
+<!-- [docker] -->
 
 ### Docker
 
@@ -123,13 +143,19 @@ To use an external database, choose external hosting during setup and set `DATAB
 | `make down`  | Stop the stack                      |
 | `make watch` | Hot reload via docker compose watch |
 
+<!-- [/docker] -->
+
+<!-- [server] -->
+
 ### HTTP Endpoints
 
 | Route              | Description                               |
 | ------------------ | ----------------------------------------- |
 | `GET /livez`       | Liveness: the process is serving requests |
-| `GET /readyz`      | Readiness: the database answers a ping    |
-| `GET /api/example` | Example handler backed by a sqlc query    |
+| `GET /readyz`      | Readiness: the database answers a ping    | <!-- [postgres] -->
+| `GET /api/example` | Example handler backed by a sqlc query    | <!-- [postgres] -->
+
+<!-- [/server] -->
 
 ### Releases
 
@@ -147,12 +173,14 @@ Configured via environment variables, loaded from `.env` when present. Process e
 | Variable           | Required | Default | Description                                        |
 | ------------------ | -------- | ------- | -------------------------------------------------- |
 | `LOG_LEVEL`        | No       | `info`  | `debug`, `info`, `warn`, `error`                   |
-| `PROXY`            | No       | none    | Client proxy: `host:port` or `host:port:user:pass` |
-| `DATABASE_URL`     | Yes      | none    | PostgreSQL connection string                       |
-| `PORT`             | No       | `8080`  | HTTP server port                                   |
-| `READ_TIMEOUT`     | No       | `10s`   | Server read timeout                                |
-| `WRITE_TIMEOUT`    | No       | `10s`   | Server write timeout                               |
-| `SHUTDOWN_TIMEOUT` | No       | `10s`   | Graceful shutdown deadline                         |
+| `PROXY`            | No       | none    | Client proxy: `host:port` or `host:port:user:pass` | <!-- [client] -->
+| `DATABASE_URL`     | Yes      | none    | PostgreSQL connection string                       | <!-- [postgres] -->
+| `PORT`             | No       | `8080`  | HTTP server port                                   | <!-- [server] -->
+| `READ_TIMEOUT`     | No       | `10s`   | Server read timeout                                | <!-- [server] -->
+| `WRITE_TIMEOUT`    | No       | `10s`   | Server write timeout                               | <!-- [server] -->
+| `SHUTDOWN_TIMEOUT` | No       | `10s`   | Graceful shutdown deadline                         | <!-- [server] -->
+
+<!-- [client] -->
 
 The HTTP client sends requests as the newest Chrome release on Windows and
 verifies TLS certificates. Select another release with `client.WithBrowser`,
@@ -168,6 +196,8 @@ serializer, and proxy configuration. `client.WithDefaultHeaderOverrides`
 replaces headers on every request; an empty value suppresses a header.
 
 Enable `client.WithInsecureSkipVerify(true)` only for targets that require it.
+
+<!-- [/client] -->
 
 ## Style Guide
 

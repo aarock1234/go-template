@@ -27,8 +27,11 @@
 // a full-line "# [tag]" or "// [tag]" to the matching "[/tag]", and blocks
 // may nest. A trailing comment made only of tags, as in
 // `"net/http" // [server]`, marks a single line, which is removed when any of
-// its tags is. After removing the sections of disabled features, setup strips
-// the remaining markers and runs go mod tidy and go fmt.
+// its tags is. Markdown has neither comment style, so README.md writes both
+// kinds of marker as an HTML comment, "<!-- [tag] -->", which a renderer
+// hides outside code fences. After removing the sections of disabled
+// features, setup strips the remaining markers and runs go mod tidy and
+// go fmt.
 //
 // Setup also points tool configuration that names the template's module
 // path, such as the import grouping in .golangci.yml, at the project's own.

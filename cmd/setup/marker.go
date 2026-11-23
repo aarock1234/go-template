@@ -19,13 +19,15 @@ const (
 
 var (
 	// blockMarker matches a trimmed line that holds only a block marker
-	// comment, such as "# [postgres]" or "// [/server]".
-	blockMarker = regexp.MustCompile(`^(?:#|//)\s*\[(/?)([a-z0-9-]+)\]$`)
+	// comment, such as "# [postgres]", "// [/server]", or the HTML comment
+	// "<!-- [docker] -->" used in Markdown.
+	blockMarker = regexp.MustCompile(`^(?:#|//|<!--)\s*\[(/?)([a-z0-9-]+)\](?:\s*-->)?$`)
 
 	// inlineMarker matches code followed by a trailing comment made only of
-	// tags, such as `"net/http" // [server]` or "PORT=8080 # [a] [b]". The
-	// first group is the code and the second holds the tags.
-	inlineMarker = regexp.MustCompile(`^(.*?\S)\s+(?:#|//)((?:\s*\[[a-z0-9-]+\])+)\s*$`)
+	// tags, such as `"net/http" // [server]`, "PORT=8080 # [a] [b]", or the
+	// Markdown table row "| `make db` | ... | <!-- [postgres-docker] -->".
+	// The first group is the code and the second holds the tags.
+	inlineMarker = regexp.MustCompile(`^(.*?\S)\s+(?:#|//|<!--)((?:\s*\[[a-z0-9-]+\])+)(?:\s*-->)?\s*$`)
 
 	// tagToken matches a single "[tag]" in an inline marker, capturing the
 	// tag name.
@@ -50,11 +52,13 @@ func (l markedLine) hasAny(tags []tag) bool {
 	return false
 }
 
-// unknownTag returns the first tag of l that is missing from knownTags and
+// unknownTag returns the first tag of l that knownTags does not list and
 // reports whether there is one.
 func (l markedLine) unknownTag() (tag, bool) {
+	known := knownTags()
+
 	for _, t := range l.tags {
-		if !slices.Contains(knownTags, t) {
+		if !slices.Contains(known, t) {
 			return t, true
 		}
 	}
@@ -64,8 +68,8 @@ func (l markedLine) unknownTag() (tag, bool) {
 
 // parseMarkers splits data, which must use "\n" line endings, into lines and
 // classifies each one. It returns an error if a block or inline marker
-// carries a tag missing from knownTags, a block marker is unbalanced, or
-// blocks overlap without nesting.
+// carries a tag that knownTags does not list, a block marker is unbalanced,
+// or blocks overlap without nesting.
 func parseMarkers(data string) ([]markedLine, error) {
 	var (
 		lines []markedLine

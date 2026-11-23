@@ -10,8 +10,9 @@ import (
 // "# [postgres]".
 type tag string
 
-// Marker tags used across the project. When adding marked sections to project
-// files, define the new tag here and add it to knownTags.
+// Marker tags of the infrastructure choices. When adding marked sections to
+// project files, define the new tag here and add it to knownTags. Optional
+// packages need no entry: each one's name is its tag.
 const (
 	tagServer         tag = "server"
 	tagClient         tag = "client"
@@ -21,15 +22,24 @@ const (
 	tagSetup          tag = "setup"
 )
 
-// knownTags lists every tag a project file may use. A marker with any other
-// tag is a mistake and aborts setup.
-var knownTags = []tag{
-	tagServer,
-	tagClient,
-	tagDocker,
-	tagPostgres,
-	tagPostgresDocker,
-	tagSetup,
+// knownTags returns every tag a project file may use: the infrastructure
+// tags, then the tags of each optional package. A marker with any other tag
+// is a mistake and aborts setup.
+func knownTags() []tag {
+	tags := []tag{
+		tagServer,
+		tagClient,
+		tagDocker,
+		tagPostgres,
+		tagPostgresDocker,
+		tagSetup,
+	}
+
+	for _, p := range optionalPackages {
+		tags = append(tags, p.removal().tags...)
+	}
+
+	return tags
 }
 
 // hosting describes how PostgreSQL is managed.
@@ -69,12 +79,19 @@ const (
 	fileDockerfile   = "Dockerfile"
 	fileDockerignore = ".dockerignore"
 	fileGolangci     = ".golangci.yml"
+	fileReadme       = "README.md"
 )
 
 // markedFiles lists every file that may contain markers. Removing a feature
 // removes its tagged sections from each of these files, and setup strips the
 // remaining markers so none reach the finished project.
-var markedFiles = []string{fileMain, fileMakefile, fileEnvExample, fileCompose}
+var markedFiles = []string{
+	fileMain,
+	fileMakefile,
+	fileEnvExample,
+	fileCompose,
+	fileReadme,
+}
 
 // feature describes what to delete when a feature is disabled.
 type feature struct {
@@ -119,44 +136,48 @@ var (
 
 // optionalPackage describes a selectable package shown in the setup form.
 type optionalPackage struct {
-	name    string  // identifies the package in the -packages flag
-	label   string  // describes the package in the form
-	feature feature // removes the package when it is deselected
+	// name identifies the package in the -packages flag, names its
+	// directory under pkg/, and is its marker tag.
+	name  string
+	label string // describes the package in the form
+}
+
+// removal returns what to delete when the package is deselected: its
+// directory and every section marked with its name.
+func (p optionalPackage) removal() feature {
+	return feature{
+		paths: []string{"pkg/" + p.name},
+		tags:  []tag{tag(p.name)},
+	}
 }
 
 // optionalPackages is the single source of truth for all toggleable
-// packages. Add new entries here; the form, the -packages flag, and removal
-// derive from it automatically.
+// packages. Add new entries here; the form, the -packages flag, the known
+// tags, and removal derive from it automatically.
 var optionalPackages = []optionalPackage{
 	{
-		name:    "worker",
-		label:   "Worker Pool: bounded concurrency via errgroup",
-		feature: feature{paths: []string{"pkg/worker"}},
+		name:  "worker",
+		label: "Worker Pool: bounded concurrency via errgroup",
 	},
 	{
-		name:    "retry",
-		label:   "Retry: exponential backoff with jitter",
-		feature: feature{paths: []string{"pkg/retry"}},
+		name:  "retry",
+		label: "Retry: exponential backoff with jitter",
 	},
 	{
-		name:    "state",
-		label:   "State: file-backed JSON with file locking",
-		feature: feature{paths: []string{"pkg/state"}},
+		name:  "state",
+		label: "State: file-backed JSON with file locking",
 	},
 	{
-		name:    "cycle",
-		label:   "Cycle: thread-safe round-robin rotator",
-		feature: feature{paths: []string{"pkg/cycle"}},
+		name:  "cycle",
+		label: "Cycle: thread-safe round-robin rotator",
 	},
 	{
-		name:    "fake",
-		label:   "Fake Data: fake data generation helpers",
-		feature: feature{paths: []string{"pkg/fake"}},
+		name:  "fake",
+		label: "Fake Data: fake data generation helpers",
 	},
 	{
-		name:    "ptr",
-		label:   "Pointer Helpers: nil-safe dereference and comparison",
-		feature: feature{paths: []string{"pkg/ptr"}},
+		name:  "ptr",
+		label: "Pointer Helpers: nil-safe dereference and comparison",
 	},
 }
 
@@ -231,7 +252,7 @@ func (c config) disabled() []feature {
 
 	for _, p := range optionalPackages {
 		if !slices.Contains(c.packages, p.name) {
-			features = append(features, p.feature)
+			features = append(features, p.removal())
 		}
 	}
 
