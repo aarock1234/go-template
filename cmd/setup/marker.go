@@ -123,7 +123,9 @@ func parseLine(raw string) markedLine {
 
 	match := inlineMarker.FindStringSubmatch(raw)
 	if match == nil {
-		return markedLine{text: raw}
+		return markedLine{
+			text: raw,
+		}
 	}
 
 	var tags []tag
