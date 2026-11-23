@@ -26,6 +26,8 @@ services:
             - .git/
             - .agents/
             - bin/
+            - go.work
+            - go.work.sum
         - action: rebuild
           path: go.mod
 

@@ -7,6 +7,10 @@
 *.out
 bin/
 
+# Go workspace
+go.work
+go.work.sum
+
 # Environment
 .env
 .env.*
