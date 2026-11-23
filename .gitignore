@@ -27,8 +27,10 @@ go.work.sum
 # Build output
 /bin/
 
-# env file
+# env files
 .env
+.env.*
+!.env.example
 
 # Editor/IDE
 # .idea/
