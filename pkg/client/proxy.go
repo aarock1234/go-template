@@ -51,15 +51,18 @@ type Proxy struct {
 }
 
 // URL returns the proxy as a URL suitable for Transport.Proxy, including
-// its credentials.
+// its credentials. A username is sent with or without a password.
 func (p *Proxy) URL() *url.URL {
 	u := &url.URL{
 		Scheme: string(p.Scheme),
 		Host:   net.JoinHostPort(p.Host, p.Port),
 	}
 
-	if p.Username != "" && p.Password != "" {
+	switch {
+	case p.Username != "" && p.Password != "":
 		u.User = url.UserPassword(p.Username, p.Password)
+	case p.Username != "":
+		u.User = url.User(p.Username)
 	}
 
 	return u
