@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/url"
 	"os"
@@ -52,7 +53,7 @@ type Proxy struct {
 
 // URL returns the proxy as a URL suitable for Transport.Proxy, including
 // its credentials. A username is sent with or without a password.
-func (p *Proxy) URL() *url.URL {
+func (p Proxy) URL() *url.URL {
 	u := &url.URL{
 		Scheme: string(p.Scheme),
 		Host:   net.JoinHostPort(p.Host, p.Port),
@@ -68,10 +69,16 @@ func (p *Proxy) URL() *url.URL {
 	return u
 }
 
-// String returns the proxy URL with its password redacted, so a Proxy can
-// be logged or formatted safely.
-func (p *Proxy) String() string {
+// String returns the proxy URL with its password redacted, so both a Proxy
+// and a *Proxy format safely.
+func (p Proxy) String() string {
 	return p.URL().Redacted()
+}
+
+// LogValue implements slog.LogValuer, so a logged Proxy never includes its
+// password.
+func (p Proxy) LogValue() slog.Value {
+	return slog.StringValue(p.String())
 }
 
 // ParseProxy parses a "host:port" or "host:port:user:pass" string into a
