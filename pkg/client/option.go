@@ -15,8 +15,9 @@ func WithProfile(profile *http.Profile) Option {
 	return func(c *Client) { c.profile = profile }
 }
 
-// WithProxy routes requests through a copy of p. A nil p disables the
-// proxy.
+// WithProxy routes requests through a copy of p. A nil p removes the
+// configured proxy, after which the transport follows the HTTP_PROXY,
+// HTTPS_PROXY, and NO_PROXY environment variables.
 func WithProxy(p *Proxy) Option {
 	return func(c *Client) {
 		if p == nil {
