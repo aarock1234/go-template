@@ -2,6 +2,7 @@ package client
 
 import (
 	"maps"
+	"net/netip"
 	"net/url"
 	"slices"
 	"strings"
@@ -9,11 +10,14 @@ import (
 	"time"
 
 	http "github.com/aarock1234/fphttp/v2"
+	"golang.org/x/net/publicsuffix"
 )
 
 // CookieJar stores cookies by domain. A cookie with a Domain attribute
 // matches that domain and its subdomains; a cookie without one matches only
-// the host that set it. Path and Secure attributes are not enforced.
+// the host that set it. A cookie whose Domain attribute does not cover the
+// host that set it, or names a public suffix such as "com", is ignored. Path
+// and Secure attributes are not enforced.
 //
 // The zero value is an empty jar ready to use. Its methods are safe for
 // concurrent use.
@@ -27,7 +31,9 @@ type CookieJar struct {
 
 // SetCookies stores cookies received from u, replacing stored cookies with
 // the same name and domain. A cookie that is already expired, or whose
-// MaxAge is negative, deletes the stored cookie instead.
+// MaxAge is negative, deletes the stored cookie instead. A cookie whose
+// Domain attribute does not cover u's host, or names a public suffix, is
+// skipped.
 func (j *CookieJar) SetCookies(u *url.URL, cookies []*http.Cookie) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
@@ -39,7 +45,11 @@ func (j *CookieJar) SetCookies(u *url.URL, cookies []*http.Cookie) {
 	now := time.Now()
 
 	for _, cookie := range cookies {
-		key := jarKey(u, cookie)
+		key, ok := cookieKey(u, cookie)
+		if !ok {
+			continue
+		}
+
 		stored := j.cookies[key]
 
 		index := slices.IndexFunc(stored, func(c *http.Cookie) bool {
@@ -104,13 +114,43 @@ func (j *CookieJar) Clear() {
 	clear(j.cookies)
 }
 
-// jarKey returns the key that stores a cookie received from u.
-func jarKey(u *url.URL, cookie *http.Cookie) string {
-	if cookie.Domain == "" {
-		return strings.ToLower(u.Hostname())
-	}
+// cookieKey returns the key that stores a cookie received from u, and
+// whether u may set it. A Domain attribute must name u's host or one of its
+// parent domains, and must not be a public suffix such as "com"; a host may
+// still set a cookie for itself.
+func cookieKey(u *url.URL, cookie *http.Cookie) (key string, ok bool) {
+	host := strings.ToLower(u.Hostname())
+	domain := strings.ToLower(strings.TrimPrefix(cookie.Domain, "."))
+	domainKey := "." + domain
 
-	return "." + strings.ToLower(strings.TrimPrefix(cookie.Domain, "."))
+	switch {
+	case domain == "":
+		return host, true
+	case isIPAddress(host), isPublicSuffix(domain):
+		// Neither has subdomains a cookie may cover, so the Domain attribute
+		// can only name the host itself, which makes the cookie host-only.
+		return host, domain == host
+	case domainMatch(host, domainKey):
+		return domainKey, true
+	default:
+		return "", false
+	}
+}
+
+// isIPAddress reports whether host is an IP address rather than a domain
+// name.
+func isIPAddress(host string) bool {
+	_, err := netip.ParseAddr(host)
+
+	return err == nil
+}
+
+// isPublicSuffix reports whether domain is a suffix under which unrelated
+// parties register names, such as "com" or "co.uk".
+func isPublicSuffix(domain string) bool {
+	suffix, _ := publicsuffix.PublicSuffix(domain)
+
+	return suffix == domain
 }
 
 // storedCookie returns a copy of cookie whose MaxAge is converted to an
