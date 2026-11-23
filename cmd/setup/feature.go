@@ -117,7 +117,7 @@ var (
 	}
 
 	postgresRemoval = feature{
-		paths: []string{"pkg/db", "pkg/service"},
+		paths: []string{"pkg/db", "pkg/service", "pkg/handler/handler.go"},
 		tags:  []tag{tagPostgres, tagPostgresDocker},
 	}
 

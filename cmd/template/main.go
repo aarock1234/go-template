@@ -92,13 +92,13 @@ func run() error {
 
 	// [server]
 	group.Go(func() error {
-		return serve(ctx, app)
+		return app.serve(ctx)
 	})
 	// [/server]
 
 	// [client]
 	group.Go(func() error {
-		return scrape(ctx, app)
+		return app.scrape(ctx)
 	})
 	// [/client]
 
@@ -110,12 +110,12 @@ func run() error {
 // serve runs the HTTP server until ctx is canceled, then shuts it down
 // within the configured timeout. A listener or shutdown failure is returned
 // even when it happens during cancellation.
-func serve(ctx context.Context, app *app) error {
+func (a *app) serve(ctx context.Context) error {
 	server := &http.Server{
-		Addr:         net.JoinHostPort("", app.config.Port),
-		Handler:      routes(app),
-		ReadTimeout:  app.config.ReadTimeout,
-		WriteTimeout: app.config.WriteTimeout,
+		Addr:         net.JoinHostPort("", a.config.Port),
+		Handler:      a.routes(),
+		ReadTimeout:  a.config.ReadTimeout,
+		WriteTimeout: a.config.WriteTimeout,
 	}
 
 	var listenConfig net.ListenConfig
@@ -144,7 +144,7 @@ func serve(ctx context.Context, app *app) error {
 		slog.InfoContext(ctx, "shutting down server", slog.Any("cause", context.Cause(ctx)))
 	}
 
-	shutdownErr := shutdownServer(server, app.config.ShutdownTimeout)
+	shutdownErr := shutdownServer(server, a.config.ShutdownTimeout)
 
 	if !serveFinished {
 		serveErr = serverError(<-serveResult)
@@ -156,7 +156,7 @@ func serve(ctx context.Context, app *app) error {
 // routes builds the HTTP handler tree. Middleware order matters: the
 // request ID is assigned first so the logger and panic recovery can use it,
 // and recovery runs inside the logger so recovered panics are logged as 500s.
-func routes(app *app) http.Handler {
+func (a *app) routes() http.Handler {
 	router := chi.NewRouter()
 	router.Use(middleware.RequestID)
 	router.Use(middleware.Logger)
@@ -164,9 +164,9 @@ func routes(app *app) http.Handler {
 
 	router.Get("/livez", handler.Live)
 	// [postgres]
-	router.Get("/readyz", handler.Ready(app.database))
+	router.Get("/readyz", handler.Ready(a.database))
 
-	example := handler.New(service.New(app.database))
+	example := handler.New(service.New(a.database))
 
 	router.Route("/api", func(r chi.Router) {
 		r.Get("/example", example.GetExample)
@@ -212,8 +212,8 @@ func serverError(err error) error {
 // scrape runs the client workload once: it fetches the fingerprint observed
 // over HTTP/1.1, then over HTTP/2. It returns nil if ctx is canceled before
 // the work completes.
-func scrape(ctx context.Context, app *app) error {
-	proxy, err := client.ParseProxy(app.config.Proxy, client.ProxySchemeHTTP)
+func (a *app) scrape(ctx context.Context) error {
+	proxy, err := client.ParseProxy(a.config.Proxy, client.ProxySchemeHTTP)
 	if err != nil {
 		return fmt.Errorf("parse proxy: %w", err)
 	}
