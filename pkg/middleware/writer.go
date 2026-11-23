@@ -10,14 +10,17 @@ type responseWriter struct {
 	wrote  bool
 }
 
-// WriteHeader records the first status code before delegating.
+// WriteHeader delegates, then records the first final status code. An
+// informational 1xx code does not start the response, and a code that
+// net/http rejects by panicking is never recorded, so panic recovery can
+// still answer.
 func (w *responseWriter) WriteHeader(code int) {
-	if !w.wrote {
+	w.ResponseWriter.WriteHeader(code)
+
+	if !w.wrote && code >= http.StatusOK {
 		w.status = code
 		w.wrote = true
 	}
-
-	w.ResponseWriter.WriteHeader(code)
 }
 
 // Write records an implicit 200 status on the first write.
