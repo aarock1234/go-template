@@ -123,7 +123,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 
     w.Header().Set("Content-Type", "application/json")
     if err := json.NewEncoder(w).Encode(item); err != nil {
-        h.logger.Error("encode response", "error", err)
+        h.logger.ErrorContext(r.Context(), "encode response", slog.Any("error", err))
     }
 }
 ```
@@ -141,7 +141,7 @@ Prefer manual wiring. Keep it explicit in `main.go`. Extract the body into a `ru
 ```go
 func main() {
     if err := run(); err != nil {
-        slog.Error("fatal error", "error", err)
+        slog.Error("fatal error", slog.Any("error", err))
         os.Exit(1)
     }
 }
@@ -170,7 +170,7 @@ func run() error {
         WriteTimeout: 10 * time.Second,
     }
 
-    logger.Info("server starting", "port", "8080")
+    logger.Info("server starting", slog.String("port", "8080"))
     if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
         return fmt.Errorf("server: %w", err)
     }

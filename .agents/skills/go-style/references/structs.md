@@ -54,8 +54,8 @@ Name constructors `New` as the package name already provides context. Callers re
 
 ```go
 type Service struct {
-    repo   Repository
-    logger *slog.Logger
+    repo    Repository
+    logger  *slog.Logger
     timeout time.Duration
 }
 

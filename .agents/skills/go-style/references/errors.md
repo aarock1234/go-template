@@ -39,7 +39,7 @@ Error messages begin lowercase unless a proper noun or initialism requires other
 ```go
 // BAD: logs and returns; caller will likely log again
 if err != nil {
-    s.logger.Error("failed to get item", "error", err)
+    s.logger.ErrorContext(ctx, "failed to get item", slog.Any("error", err))
     return nil, fmt.Errorf("get item: %w", err)
 }
 
