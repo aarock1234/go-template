@@ -12,8 +12,10 @@ sql:
         emit_json_tags: true
         json_tags_case_style: camel
         emit_interface: true
-        emit_prepared_queries: true
-        initialisms: ["id", "uuid", "cvv", "ip"]
+        initialisms: ["id", "uuid", "ip"]
+        # Nullable columns generate github.com/aarondl/null/v9 types. The module
+        # is not required until the first one is generated; after that, run
+        # `go mod tidy` to add it.
         overrides:
           - db_type: "pg_catalog.int4"
             nullable: true
