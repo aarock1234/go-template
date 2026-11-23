@@ -60,10 +60,14 @@ func main() {
 
 // run loads configuration, opens shared dependencies, and runs every
 // workload until all of them finish, one of them fails, or the process
-// receives an interrupt or termination signal.
+// receives an interrupt or termination signal. A second signal during
+// shutdown terminates the process immediately.
 func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	// Once shutdown begins, a second signal terminates the process.
+	context.AfterFunc(ctx, stop)
 
 	config, err := env.New[Config]()
 	if err != nil {
