@@ -93,25 +93,25 @@ go-template/
 
 ## Development
 
-| Command         | Description                                  |
-| --------------- | -------------------------------------------- |
-| `make dev`      | Run the application                          |
-| `make build`    | Compile the binary to `bin/template`         |
-| `make lint`     | Static analysis via golangci-lint            |
-| `make format`   | Format with gofmt and goimports              |
-| `make fix`      | Modernize code via `go fix`                  |
-| `make test`     | Run tests with the race detector             |
-| `make generate` | Run code generation (`sqlc generate`)        |
+| Command         | Description                           |
+| --------------- | ------------------------------------- |
+| `make dev`      | Run the application                   |
+| `make build`    | Compile the binary to `bin/template`  |
+| `make lint`     | Static analysis via golangci-lint     |
+| `make format`   | Format with gofmt and goimports       |
+| `make fix`      | Modernize code via `go fix`           |
+| `make test`     | Run tests with the race detector      |
+| `make generate` | Run code generation (`sqlc generate`) |
 
 ### Database
 
-| Command                       | Description                            |
-| ----------------------------- | -------------------------------------- |
-| `make db`                     | Start PostgreSQL only (localhost:5432) |
-| `make db-down`                | Stop PostgreSQL                        |
-| `make migrate`                | Apply migrations                       |
-| `make migrate-down`           | Roll back the last migration           |
-| `make migrate-new name=<name>` | Create a migration file               |
+| Command                        | Description                            |
+| ------------------------------ | -------------------------------------- |
+| `make db`                      | Start PostgreSQL only (localhost:5432) |
+| `make db-down`                 | Stop PostgreSQL                        |
+| `make migrate`                 | Apply migrations                       |
+| `make migrate-down`            | Roll back the last migration           |
+| `make migrate-new name=<name>` | Create a migration file                |
 
 To use an external database, choose external hosting during setup and set `DATABASE_URL` in `.env`.
 
@@ -125,11 +125,11 @@ To use an external database, choose external hosting during setup and set `DATAB
 
 ### HTTP Endpoints
 
-| Route              | Description                                 |
-| ------------------ | ------------------------------------------- |
-| `GET /livez`       | Liveness: the process is serving requests   |
-| `GET /readyz`      | Readiness: the database answers a ping      |
-| `GET /api/example` | Example handler backed by a sqlc query      |
+| Route              | Description                               |
+| ------------------ | ----------------------------------------- |
+| `GET /livez`       | Liveness: the process is serving requests |
+| `GET /readyz`      | Readiness: the database answers a ping    |
+| `GET /api/example` | Example handler backed by a sqlc query    |
 
 ### Releases
 
@@ -144,15 +144,15 @@ git push origin v1.2.3
 
 Configured via environment variables, loaded from `.env` when present. Process environment variables take precedence.
 
-| Variable           | Required | Default | Description                                       |
-| ------------------ | -------- | ------- | ------------------------------------------------- |
-| `LOG_LEVEL`        | No       | `info`  | `debug`, `info`, `warn`, `error`                  |
+| Variable           | Required | Default | Description                                        |
+| ------------------ | -------- | ------- | -------------------------------------------------- |
+| `LOG_LEVEL`        | No       | `info`  | `debug`, `info`, `warn`, `error`                   |
 | `PROXY`            | No       | none    | Client proxy: `host:port` or `host:port:user:pass` |
-| `DATABASE_URL`     | Yes      | none    | PostgreSQL connection string                      |
-| `PORT`             | No       | `8080`  | HTTP server port                                  |
-| `READ_TIMEOUT`     | No       | `10s`   | Server read timeout                               |
-| `WRITE_TIMEOUT`    | No       | `10s`   | Server write timeout                              |
-| `SHUTDOWN_TIMEOUT` | No       | `10s`   | Graceful shutdown deadline                        |
+| `DATABASE_URL`     | Yes      | none    | PostgreSQL connection string                       |
+| `PORT`             | No       | `8080`  | HTTP server port                                   |
+| `READ_TIMEOUT`     | No       | `10s`   | Server read timeout                                |
+| `WRITE_TIMEOUT`    | No       | `10s`   | Server write timeout                               |
+| `SHUTDOWN_TIMEOUT` | No       | `10s`   | Graceful shutdown deadline                         |
 
 The HTTP client sends requests as the newest Chrome release on Windows and
 verifies TLS certificates. Select another release with `client.WithBrowser`,
@@ -171,7 +171,7 @@ Enable `client.WithInsecureSkipVerify(true)` only for targets that require it.
 
 ## Style Guide
 
-Code follows the `go-style` skill in [`.agents/skills/go-style`](.agents/skills/go-style/SKILL.md), which agents such as Codex, Cursor, and Gemini discover automatically.
+Read [STYLE.md](STYLE.md) for the readability philosophy and concrete examples, and [AGENTS.md](AGENTS.md) for repository instructions. Detailed language guidance lives in the local [go-style skill](.agents/skills/go-style/SKILL.md). Tests require an explicit request.
 
 ## License
 

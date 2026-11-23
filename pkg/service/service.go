@@ -19,7 +19,9 @@ type Service struct {
 
 // New creates a Service with the given repository.
 func New(repo Repository) *Service {
-	return &Service{repo: repo}
+	return &Service{
+		repo: repo,
+	}
 }
 
 // Example runs the example query via the repository.

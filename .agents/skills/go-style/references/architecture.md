@@ -12,7 +12,6 @@
 
 Use [package boundaries](#go-package-structure) and [explicit dependency wiring](#go-dependency-wiring); add layers only for an existing ownership or change boundary.
 
-
 <a id="go-package-structure"></a>
 
 ### Package Structure
@@ -26,12 +25,13 @@ project/
     ├── handler/            # HTTP handlers
     ├── service/            # business logic
     ├── repository/         # data access
-    ├── model/              # shared types
+    ├── item/               # item contracts and domain rules
     └── log/                # side-effect init
 ```
 
 The template uses `pkg/` as its default project layout; preserve that convention when working in a repository built from it. This is a layout preference, not a Go restriction. `internal/` enforces an import boundary and is also valid for private commands and servers. Use the repository's established boundary policy, and choose `internal/` when packages are deliberately unavailable to external importers. Do not relocate an existing package tree merely to satisfy a generic layout slogan.
 
+Keep domain contracts with the capability that owns them. Give a known shape one authority; share a coherent domain contract when needed rather than duplicating fields across packages or collecting unrelated declarations in `types`, `model`, `helpers`, or `utils`. Separate genuinely different transport and domain contracts with explicit conversion.
 
 Sources: [reference 1](https://go.dev/doc/modules/layout).
 
@@ -40,6 +40,8 @@ Sources: [reference 1](https://go.dev/doc/modules/layout).
 ### Layered Architecture
 
 Use these layers when transport, business rules, and storage have distinct responsibilities. Keep a small command direct if separate layers would only forward calls. The repository contract belongs to the consuming service; the examples show the contract beside its implementation to explain the dependency, not to require an implementer-owned interface.
+
+Separate file/network I/O, decoding and boundary validation, domain decisions, orchestration, and presentation when they have different reasons to change. Validate untrusted data at its receiving boundary, keep domain rules independent of CLI text or storage details, and keep process construction and resource lifetime readable at the entrypoint. These are ownership decisions, not mandatory folders or interfaces. Do not create micro-files or forwarding wrappers merely to shorten a function; keep a short, related workflow together.
 
 **Repository Layer** - Data access
 
@@ -128,7 +130,6 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 
 Query-layer boundaries also own [transactions and cursor completion](data.md); keep those contracts visible when adding a repository.
 
-
 Sources: [reference 1](https://go.dev/wiki/CodeReviewComments#interfaces).
 
 <a id="go-dependency-wiring"></a>
@@ -179,6 +180,5 @@ func run() error {
 ```
 
 This example demonstrates explicit dependency construction. Use [graceful shutdown](lifecycle.md#go-shutdown) for a long-lived server's signal handling, listener ownership, and bounded cleanup. `sql.Open` prepares a database handle; call `PingContext` when startup must establish that the configured database is reachable. Do not treat `http.ErrServerClosed` after an intentional shutdown as an unexpected listener failure.
-
 
 Sources: [reference 1](https://pkg.go.dev/net/http@go1.26.1#Server.ListenAndServe), [reference 2](https://pkg.go.dev/database/sql#Open).

@@ -18,28 +18,29 @@ Use the configured Go reference project as the primary concrete example when ava
 
 ## Find the guidance for this change
 
-| When changing… | Read… |
-| --- | --- |
-| Imports, names, packages, spacing, comments | [Modules](references/modules.md) |
-| Error contracts, wrapping, sentinels, close failures, panic | [Errors](references/errors.md) |
-| Struct layout, constructors, options, embedding, zero values, receivers | [Structs](references/structs.md) |
-| Generics, JSON decoding, optional fields, collections, constants | [Types and boundaries](references/types.md) |
-| Dependency contracts or interface composition | [Interfaces](references/interfaces.md) |
-| Workers, goroutines, channels, locks, errgroup, retries | [Concurrency](references/concurrency.md), then [context](references/context.md) |
-| Ordinary HTTP clients, specialized transports, proxies, response bodies | [Client applicability and body lifetime](references/http.md#go-http-client), [errors](references/errors.md), and [context](references/context.md) |
-| Project packages, layers, dependency wiring | [Architecture](references/architecture.md), then [lifecycle](references/lifecycle.md) when wiring a long-running process |
-| Cancellation, deadlines, request-scoped values | [Context](references/context.md) |
-| Log setup, attributes, error reporting, redaction | [Logging](references/logging.md) |
-| Lazy iteration, sequences, collection traversal | [Iterators](references/iterators.md) |
-| Server start/stop, process lifetime, cleanup, file state and persistence | [Lifecycle](references/lifecycle.md), [context](references/context.md), and [errors](references/errors.md) |
-| Database queries, row iteration, transactions, and persistence | [Database work](references/data.md), then [errors](references/errors.md) and [context](references/context.md) |
-| Dependencies, static analysis, formatting, modernizing APIs | [Workflow](references/workflow.md) |
+| When changing…                                                           | Read…                                                                                                                                             |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Imports, names, packages, spacing, comments                              | [Modules](references/modules.md)                                                                                                                  |
+| Error contracts, wrapping, sentinels, close failures, panic              | [Errors](references/errors.md)                                                                                                                    |
+| Struct layout, constructors, options, embedding, zero values, receivers  | [Structs](references/structs.md)                                                                                                                  |
+| Generics, JSON decoding, optional fields, collections, constants         | [Types and boundaries](references/types.md)                                                                                                       |
+| Dependency contracts or interface composition                            | [Interfaces](references/interfaces.md)                                                                                                            |
+| Workers, goroutines, channels, locks, errgroup, retries                  | [Concurrency](references/concurrency.md), then [context](references/context.md)                                                                   |
+| Ordinary HTTP clients, specialized transports, proxies, response bodies  | [Client applicability and body lifetime](references/http.md#go-http-client), [errors](references/errors.md), and [context](references/context.md) |
+| Project packages, layers, dependency wiring                              | [Architecture](references/architecture.md), then [lifecycle](references/lifecycle.md) when wiring a long-running process                          |
+| Cancellation, deadlines, request-scoped values                           | [Context](references/context.md)                                                                                                                  |
+| Log setup, attributes, error reporting, redaction                        | [Logging](references/logging.md)                                                                                                                  |
+| Lazy iteration, sequences, collection traversal                          | [Iterators](references/iterators.md)                                                                                                              |
+| Server start/stop, process lifetime, cleanup, file state and persistence | [Lifecycle](references/lifecycle.md), [context](references/context.md), and [errors](references/errors.md)                                        |
+| Database queries, row iteration, transactions, and persistence           | [Database work](references/data.md), then [errors](references/errors.md) and [context](references/context.md)                                     |
+| Dependencies, static analysis, formatting, modernizing APIs              | [Workflow](references/workflow.md)                                                                                                                |
 
 ## Scope and working constraints
 
 - These are project conventions. Repository conventions and explicit user instructions determine how they apply; language correctness and public contracts still matter.
 - Match the module's supported Go version. Read [version applicability](references/foundations.md) before using `omitzero`, `WaitGroup.Go`, `new(expr)`, `errors.AsType`, or generic methods.
-- Favor clear names, focused files, readable literals, and logical whitespace over compressed code. Formatter compliance alone does not establish readability.
+- Optimize for a human reading the whole operation. Expand every nonempty struct declaration, struct literal, and keyed map literal, including one-field options, nested values, arguments, and returns. Use keyed struct fields; see [record layout](references/structs.md#go-struct-literals).
+- Favor clear names, small focused functions, and purposeful whitespace over compressed code. Keep the workflow continuous; separate I/O, boundary validation, domain rules, orchestration, and presentation for real ownership reasons, not a quota of files or layers. Formatter compliance alone does not establish readability.
 - Never add, write, run, propose, or plan tests unless the user explicitly requests them. Static analysis and formatting checks are separate; inspect Makefile targets and aggregate commands for indirect test execution.
 - Dependency updates and source-rewriting commands require a reason within the current task. They are not routine read-only checks.
 

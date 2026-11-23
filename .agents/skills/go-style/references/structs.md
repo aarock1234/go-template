@@ -16,27 +16,35 @@
 
 Choose [construction](#go-constructors), [options](#go-functional-options), [receiver behavior](#go-receivers), and [mutable ownership](#go-mutable-input-ownership) from the actual type contract.
 
-
 <a id="go-struct-literals"></a>
 
 ### Struct Literal Formatting
 
-Always use multi-line format for struct literals with two or more fields. Single-line is only acceptable for one field.
+Write every nonempty struct declaration, struct literal, and keyed map literal on multiple lines, one field or entry per line. Use keyed struct fields. This includes one-field configuration, nested values, function arguments, and return values, even when they fit the line width. The structure should be visible without unpacking punctuation.
 
 ```go
-// GOOD: single field, inline is fine
-item := Item{ID: "abc"}
-
-// GOOD: multiple fields, one per line
-item := Item{
-    ID:   "abc",
-    Name: "example",
+type Item struct {
+	ID string
 }
 
-// BAD: multiple fields crammed on one line
-item := Item{ID: "abc", Name: "example"}
+item := Item{
+	ID: "abc",
+}
+
+labels := map[string]string{
+	"status": "ready",
+}
+
+func New(repo Repository) *Service {
+	return &Service{
+		repo: repo,
+	}
+}
 ```
 
+Empty values such as `Item{}`, `struct{}{}`, and `map[string]string{}` may stay compact. Collections of simple values are a separate layout decision; this convention does not expand every brace indiscriminately. Do not hand-reformat generated or vendored code. Language-required forms and public compatibility contracts take precedence; document real exceptions.
+
+Keep gofmt alignment and review nested arguments and returns after formatting. gofmt preserves ordinary Go syntax; it does not expand every compact record or assess readability for you.
 
 <a id="go-constructors"></a>
 
@@ -59,7 +67,6 @@ func New(repo Repository, logger *slog.Logger) *Service {
     }
 }
 ```
-
 
 <a id="go-functional-options"></a>
 
@@ -99,7 +106,6 @@ if err != nil {
 }
 ```
 
-
 <a id="go-embedding"></a>
 
 ### Struct Embedding
@@ -138,7 +144,6 @@ func (p *PDFProcessor) Process(input Input) error {
 // it silently shadows BaseProcessor.Validate.
 ```
 
-
 Sources: [reference 1](https://go.dev/doc/effective_go#embedding).
 
 <a id="go-zero-values"></a>
@@ -168,7 +173,6 @@ func (c *Cache) Set(key, value string) {
 }
 ```
 
-
 <a id="go-receivers"></a>
 
 ### Pointer vs Value Receivers
@@ -186,7 +190,6 @@ func (s Status) String() string { return string(s) }
 ```
 
 If any method on a type uses a pointer receiver, all methods on that type should use pointer receivers for consistency.
-
 
 Sources: [reference 1](https://pkg.go.dev/sync), [reference 2](https://go.dev/wiki/CodeReviewComments#receiver-type).
 
@@ -213,6 +216,5 @@ This option snapshots at creation and gives each client its own header map if th
 Synchronize shared mutable state according to its contract. Returning a pointer under a lock does not keep later caller mutations protected. Read [shared state](concurrency.md#go-shared-state) and [receiver semantics](structs.md#go-receivers) when ownership and concurrent access interact.
 
 State the copy depth and [nil/empty collection contract](types.md#go-collection-contracts) separately; a shallow copy does not isolate objects referenced by its elements.
-
 
 Sources: [reference 1](https://pkg.go.dev/net/http@go1.26.1#Header.Clone), [reference 2](https://go.dev/wiki/CodeReviewComments#copying).
