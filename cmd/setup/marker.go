@@ -50,8 +50,21 @@ func (l markedLine) hasAny(tags []tag) bool {
 	return false
 }
 
+// unknownTag returns the first tag of l that is missing from knownTags and
+// reports whether there is one.
+func (l markedLine) unknownTag() (tag, bool) {
+	for _, t := range l.tags {
+		if !slices.Contains(knownTags, t) {
+			return t, true
+		}
+	}
+
+	return "", false
+}
+
 // parseMarkers splits data, which must use "\n" line endings, into lines and
-// classifies each one. It returns an error if a block marker is unbalanced or
+// classifies each one. It returns an error if a block or inline marker
+// carries a tag missing from knownTags, a block marker is unbalanced, or
 // blocks overlap without nesting.
 func parseMarkers(data string) ([]markedLine, error) {
 	var (
@@ -61,6 +74,10 @@ func parseMarkers(data string) ([]markedLine, error) {
 
 	for i, raw := range strings.Split(data, "\n") {
 		l := parseLine(raw)
+
+		if unknown, found := l.unknownTag(); found {
+			return nil, fmt.Errorf("line %d: unknown tag [%s]", i+1, unknown)
+		}
 
 		switch l.marker {
 		case markerOpen:

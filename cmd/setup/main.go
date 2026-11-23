@@ -19,7 +19,9 @@
 //	-packages          comma-separated names of optional packages to keep:
 //	                   worker, retry, state, cycle, fake, ptr (default all)
 //
-// At least one of the server or the client must be kept.
+// At least one of the server or the client must be kept. Giving
+// -postgres-hosting is rejected when PostgreSQL is not kept, and docker
+// hosting is rejected when Docker is not kept.
 //
 // Project files mark feature-specific code with comments. A block runs from
 // a full-line "# [tag]" or "// [tag]" to the matching "[/tag]", and blocks
@@ -85,9 +87,13 @@ func run() error {
 	return apply(ctx, c)
 }
 
+// flagPostgresHosting names the flag that chooses the PostgreSQL hosting.
+const flagPostgresHosting = "postgres-hosting"
+
 // parseFlags parses the command line into the initial configuration and
 // reports whether -y was given, in which case the configuration is final.
-// Invalid flags print usage and exit the process.
+// Invalid flags print usage and exit the process. A hosting flag that
+// contradicts the other flags is returned as an error.
 func parseFlags(args []string) (c config, yes bool, err error) {
 	c.packages = packageNames()
 
@@ -97,7 +103,7 @@ func parseFlags(args []string) (c config, yes bool, err error) {
 	flags.BoolVar(&c.client, "client", true, "keep the HTTP client")
 	flags.BoolVar(&c.docker, "docker", true, "keep the Docker files")
 	flags.BoolVar(&c.postgres, "postgres", true, "keep PostgreSQL support")
-	flags.TextVar(&c.pgHosting, "postgres-hosting", hostingDocker, "PostgreSQL `hosting`: docker or external")
+	flags.TextVar(&c.pgHosting, flagPostgresHosting, hostingDocker, "PostgreSQL `hosting`: docker or external")
 
 	// The backquoted word names the flag's argument in the usage message.
 	packagesUsage := fmt.Sprintf("comma-separated `names` of optional packages to keep: %s (default all)", strings.Join(packageNames(), ","))
@@ -120,7 +126,41 @@ func parseFlags(args []string) (c config, yes bool, err error) {
 		return config{}, false, fmt.Errorf("unexpected argument %q", flags.Arg(0))
 	}
 
+	if isSet(flags, flagPostgresHosting) {
+		if err := checkHosting(c); err != nil {
+			return config{}, false, err
+		}
+	}
+
 	return c, yes, nil
+}
+
+// isSet reports whether the flag called name was given on the command line.
+func isSet(flags *flag.FlagSet, name string) bool {
+	set := false
+
+	flags.Visit(func(f *flag.Flag) {
+		if f.Name == name {
+			set = true
+		}
+	})
+
+	return set
+}
+
+// checkHosting rejects an explicitly given hosting that the rest of c would
+// silently override: any hosting without PostgreSQL, and docker hosting
+// without Docker.
+func checkHosting(c config) error {
+	if !c.postgres {
+		return fmt.Errorf("-%s requires -postgres", flagPostgresHosting)
+	}
+
+	if !c.docker && c.pgHosting == hostingDocker {
+		return fmt.Errorf("-%s=%s requires -docker", flagPostgresHosting, hostingDocker)
+	}
+
+	return nil
 }
 
 // parsePackages splits a comma-separated list of optional package names. It
@@ -148,8 +188,8 @@ func parsePackages(list string) ([]string, error) {
 // apply removes everything c disables, strips the remaining markers, deletes
 // the setup command, and tidies the module. Malformed markers abort before
 // anything changes. A failed file or directory change does not stop the
-// remaining steps but makes apply return an error. Failures of go mod tidy
-// and go fmt are only warnings.
+// remaining steps but makes apply return an error. So does a failed or
+// interrupted go mod tidy or go fmt, once the changes themselves succeeded.
 func apply(ctx context.Context, c config) error {
 	removal := c.removal()
 
@@ -165,11 +205,17 @@ func apply(ctx context.Context, c config) error {
 		removePaths(removal.paths),
 	)
 
-	warn(runGo(ctx, "mod", "tidy"))
-	warn(runGo(ctx, "fmt", "./..."))
+	tidyErr := errors.Join(
+		runGo(ctx, "mod", "tidy"),
+		runGo(ctx, "fmt", "./..."),
+	)
 
 	if changeErr != nil {
 		return fmt.Errorf("setup incomplete: %w", changeErr)
+	}
+
+	if tidyErr != nil {
+		return fmt.Errorf("features removed, but the module was not tidied; run go mod tidy and go fmt ./... by hand: %w", tidyErr)
 	}
 
 	fmt.Println("\nsetup complete")
@@ -189,11 +235,4 @@ func runGo(ctx context.Context, args ...string) error {
 	}
 
 	return nil
-}
-
-// warn prints a non-fatal error to stderr.
-func warn(err error) {
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "warning: %v\n", err)
-	}
 }

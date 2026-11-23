@@ -3,7 +3,6 @@ package main
 import (
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"strings"
 )
@@ -15,20 +14,18 @@ type markedFile struct {
 	lines []markedLine
 }
 
-// loadMarkedFiles reads and parses each file in paths, skipping files that
-// do not exist. It reads everything before setup changes anything, so a
-// malformed marker aborts setup with the project untouched.
+// loadMarkedFiles reads and parses each file in paths. It reads everything
+// before setup changes anything, so a missing file or a malformed marker
+// aborts setup with the project untouched. Every marked file exists in a
+// freshly scaffolded project, so a missing one means setup is running outside
+// the project root.
 func loadMarkedFiles(paths []string) ([]markedFile, error) {
 	var files []markedFile
 
 	for _, path := range paths {
 		data, err := os.ReadFile(path)
-		if errors.Is(err, fs.ErrNotExist) {
-			continue
-		}
-
 		if err != nil {
-			return nil, fmt.Errorf("read %s: %w", path, err)
+			return nil, fmt.Errorf("read %s: %w: run setup from the project root", path, err)
 		}
 
 		// Parse with "\n" line endings. A file using any CRLF line ending is

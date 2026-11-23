@@ -10,8 +10,8 @@ import (
 // "# [postgres]".
 type tag string
 
-// Marker tags used across the project. Define new tags here when adding
-// marked sections to project files.
+// Marker tags used across the project. When adding marked sections to project
+// files, define the new tag here and add it to knownTags.
 const (
 	tagServer         tag = "server"
 	tagClient         tag = "client"
@@ -20,6 +20,17 @@ const (
 	tagPostgresDocker tag = "postgres-docker"
 	tagSetup          tag = "setup"
 )
+
+// knownTags lists every tag a project file may use. A marker with any other
+// tag is a mistake and aborts setup.
+var knownTags = []tag{
+	tagServer,
+	tagClient,
+	tagDocker,
+	tagPostgres,
+	tagPostgresDocker,
+	tagSetup,
+}
 
 // hosting describes how PostgreSQL is managed.
 type hosting string
